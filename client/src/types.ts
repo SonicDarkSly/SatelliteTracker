@@ -81,6 +81,8 @@ export interface CatalogSnapshot {
   generatedAt: string;
   fetchedAt: string;
   stale: boolean;
+  /** Une récupération est en cours côté serveur : l'instantané est provisoire. */
+  fetching?: boolean;
   count: number;
   satellites: SatelliteRecord[];
   categories: FacetCount[];

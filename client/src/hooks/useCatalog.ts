@@ -30,6 +30,9 @@ export interface CatalogState {
  */
 let pending: Promise<CatalogSnapshot> | undefined;
 
+/** Intervalle de relance tant que le serveur annonce une récupération en cours. */
+const FETCHING_POLL_MS = 5000;
+
 function loadCatalog(force: boolean): Promise<CatalogSnapshot> {
   if (!force && pending) return pending;
 
@@ -78,6 +81,17 @@ export function useCatalog(): CatalogState {
     localJson.remove(STORAGE_KEYS.catalog);
     void fetchCatalog(false, false);
   }, [fetchCatalog]);
+
+  /*
+   * Le serveur signale `fetching` quand il a répondu avant la fin d'une
+   * récupération, pour ne pas laisser la page attendre une minute. On redemande
+   * donc périodiquement jusqu'à obtenir le catalogue complet.
+   */
+  useEffect(() => {
+    if (!snapshot?.fetching) return;
+    const id = window.setTimeout(() => void fetchCatalog(false, true), FETCHING_POLL_MS);
+    return () => window.clearTimeout(id);
+  }, [snapshot, fetchCatalog]);
 
   const refresh = useCallback(
     (force = true) => void fetchCatalog(force, snapshot !== undefined),

@@ -7,7 +7,7 @@ import { Logger } from '@nestjs/common';
 import type { TleFetchResult, TleSourcePort } from '../../domain/ports/TleSourcePort.js';
 import { parseTleCatalog } from '../../domain/services/parseTle.js';
 import { DEFAULT_HEADERS, fetchWithRetry } from '../http/fetch.js';
-import { celestrakGroupUrl, maxEpochAgeDays } from '../config/celestrak.js';
+import { celestrakGroupUrl, celestrakTimeoutMs, maxEpochAgeDays } from '../config/celestrak.js';
 
 /**
  * Attente après un blocage (HTTP 403), progressive.
@@ -21,6 +21,17 @@ import { celestrakGroupUrl, maxEpochAgeDays } from '../config/celestrak.js';
  */
 const BLOCK_BACKOFF_INITIAL_MS = 10 * 60 * 1000;
 const BLOCK_BACKOFF_MAX_MS = 2 * 60 * 60 * 1000;
+
+/**
+ * Attente après une indisponibilité passagère du service (502, 503, 504) ou un
+ * dépassement de délai. À distinguer nettement du blocage pour excès de requêtes :
+ * ici le serveur ne nous reproche rien, il est seulement en difficulté. Deux
+ * minutes suffisent, là où une heure serait absurde.
+ */
+const TRANSIENT_BACKOFF_MS = 2 * 60 * 1000;
+
+/** Codes signalant une indisponibilité passagère plutôt qu'un refus. */
+const TRANSIENT_STATUSES = new Set([500, 502, 503, 504]);
 
 /**
  * Heure locale au format court.
@@ -61,7 +72,10 @@ export class CelestrakSource implements TleSourcePort {
     }
 
     try {
-      const response = await fetchWithRetry(url, { headers: DEFAULT_HEADERS });
+      // Une seule tentative : la relance doublait l'attente en cas de lenteur du
+      // serveur (deux fois le délai, plus la pause), pour un résultat identique.
+      // Le backoff se charge de réessayer plus tard.
+      const response = await fetchWithRetry(url, { headers: DEFAULT_HEADERS }, celestrakTimeoutMs(), 0);
 
       if (response.status === 403) {
         this.blockedUntil = Date.now() + this.backoffMs;
@@ -69,6 +83,14 @@ export class CelestrakSource implements TleSourcePort {
         return this.failure(
           'HTTP 403 — Celestrak limite le débit (trop de requêtes récentes). ' +
             `Les données en cache restent utilisées ; nouvelle tentative à partir de ${formatTime(this.blockedUntil)}.`,
+        );
+      }
+
+      if (TRANSIENT_STATUSES.has(response.status)) {
+        this.blockedUntil = Date.now() + TRANSIENT_BACKOFF_MS;
+        return this.failure(
+          `HTTP ${response.status} — service Celestrak momentanément indisponible. ` +
+            `Nouvelle tentative à partir de ${formatTime(this.blockedUntil)}.`,
         );
       }
 
@@ -100,7 +122,16 @@ export class CelestrakSource implements TleSourcePort {
 
       return { sourceId: this.id, label: this.label, satellites: fresh, ok: true };
     } catch (err) {
-      return this.failure(err instanceof Error ? err.message : String(err));
+      // Délai dépassé ou coupure réseau : même traitement qu'une indisponibilité
+      // passagère, on laisse le serveur respirer avant de réessayer.
+      this.blockedUntil = Date.now() + TRANSIENT_BACKOFF_MS;
+      const detail = err instanceof Error ? err.message : String(err);
+      const readable = /abort/i.test(detail)
+        ? `délai de ${Math.round(celestrakTimeoutMs() / 1000)} s dépassé (serveur lent ou indisponible)`
+        : detail;
+      return this.failure(
+        `${readable} — nouvelle tentative à partir de ${formatTime(this.blockedUntil)}.`,
+      );
     }
   }
 

@@ -159,6 +159,14 @@ body {
   color: rgba(230, 233, 239, 0.8);
 }
 
+.overlay-detail {
+  max-width: 340px;
+  text-align: center;
+  font-size: 12px;
+  opacity: 0.7;
+  line-height: 1.5;
+}
+
 .alert-hint {
   margin-top: 6px;
   font-size: 12px;

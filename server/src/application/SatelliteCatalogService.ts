@@ -31,6 +31,30 @@ import { politePause } from '../infrastructure/http/fetch.js';
 const FORCE_MIN_INTERVAL_MS = 5 * 60 * 1000;
 
 /**
+ * Temps maximal qu'une requête HTTP consacre à attendre une récupération en cours.
+ * Au-delà, on répond avec ce qu'on a plutôt que de laisser la page figée.
+ */
+const RESPONSE_BUDGET_MS = 4000;
+
+/** Instantané vide, servi quand aucune donnée n'est disponible. */
+function emptySnapshot(): CatalogSnapshot {
+  const now = new Date().toISOString();
+  return {
+    generatedAt: now,
+    fetchedAt: now,
+    stale: false,
+    count: 0,
+    satellites: [],
+    categories: [],
+    regimes: [],
+    owners: [],
+    families: {},
+    sources: [],
+    warnings: [],
+  };
+}
+
+/**
  * Taille en dessous de laquelle un catalogue accompagné d'un avertissement est
  * jugé invraisemblable. Le catalogue réel compte plus de 15 000 objets ; quelques
  * centaines signifient qu'une source majeure a échoué (typiquement `active` en
@@ -118,12 +142,50 @@ export class SatelliteCatalogService {
       return this.lastUnusable.snapshot;
     }
 
-    if (this.inFlight) return this.inFlight;
+    if (this.inFlight) return this.withResponseBudget(this.inFlight);
 
     this.inFlight = this.refresh().finally(() => {
       this.inFlight = undefined;
     });
-    return this.inFlight;
+    return this.withResponseBudget(this.inFlight);
+  }
+
+  /**
+   * Limite le temps qu'une requête HTTP passe à attendre une récupération.
+   *
+   * Le groupe « active » pèse plusieurs mégaoctets et le serveur distant peut
+   * mettre une minute à répondre — voire échouer après le délai. Sans plafond, la
+   * page restait figée tout ce temps : mesuré à 63 s sur un incident réel, la
+   * pire expérience possible pour un utilisateur qui ne sait pas ce qui se passe.
+   *
+   * Passé le budget, on renvoie ce qu'on a (cache ou instantané vide) en signalant
+   * `fetching` : le client affiche l'état et redemande quelques secondes plus tard,
+   * pendant que la récupération se poursuit en tâche de fond.
+   */
+  private withResponseBudget(pending: Promise<CatalogSnapshot>): Promise<CatalogSnapshot> {
+    return new Promise<CatalogSnapshot>((resolve) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        const cached = this.cache.read();
+        resolve({ ...(cached?.snapshot ?? emptySnapshot()), fetching: true });
+      }, RESPONSE_BUDGET_MS);
+
+      pending
+        .then((snapshot) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve(snapshot);
+        })
+        .catch(() => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve(emptySnapshot());
+        });
+    });
   }
 
   /** Un satellite par n° NORAD, depuis le catalogue courant. */

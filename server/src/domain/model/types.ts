@@ -116,6 +116,11 @@ export interface CatalogSnapshot {
   readonly generatedAt: string;
   readonly fetchedAt: string;
   readonly stale: boolean;
+  /**
+   * Une récupération est en cours : l'instantané renvoyé est provisoire.
+   * Le client peut redemander le catalogue dans quelques secondes.
+   */
+  readonly fetching?: boolean;
   readonly count: number;
   readonly satellites: SatelliteRecord[];
   readonly categories: FacetCount[];

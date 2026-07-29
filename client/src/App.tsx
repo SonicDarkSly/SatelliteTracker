@@ -231,9 +231,24 @@ export default function App(): JSX.Element {
             />
           )}
 
+          {/* Récupération en cours côté serveur : le catalogue n'est pas encore
+              arrivé, mais la page n'est pas bloquée pour autant. */}
+          {!error && snapshot?.fetching && satellites?.length === 0 && (
+            <div className="overlay">
+              <div className="overlay-stack">
+                <Spin size="large" />
+                <span>Récupération des éléments orbitaux en cours…</span>
+                <span className="overlay-detail">
+                  Le catalogue complet représente plusieurs mégaoctets. L’affichage se
+                  mettra à jour tout seul.
+                </span>
+              </div>
+            </div>
+          )}
+
           {/* Catalogue vide : c'est la seule information utile à afficher, et il
               faut expliquer pourquoi plutôt que laisser un globe désert. */}
-          {!error && !loading && satellites?.length === 0 && (
+          {!error && !loading && !snapshot?.fetching && satellites?.length === 0 && (
             <Alert
               className="floating-alert"
               type="error"

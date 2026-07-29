@@ -79,6 +79,19 @@ export function catalogTtlMs(): number {
   return (Number.isFinite(minutes) && minutes > 0 ? minutes : 120) * 60_000;
 }
 
+/**
+ * Délai d'attente d'un groupe de TLE (CELESTRAK_TIMEOUT_MS, défaut 60 s).
+ *
+ * Le groupe « active » représente plusieurs mégaoctets : 20 s suffisaient en
+ * temps normal, mais pas quand le serveur répond lentement — la requête était
+ * alors abandonnée pour rien (« This operation was aborted ») alors qu'elle
+ * aurait abouti.
+ */
+export function celestrakTimeoutMs(): number {
+  const ms = Number(process.env.CELESTRAK_TIMEOUT_MS ?? 60_000);
+  return Number.isFinite(ms) && ms > 1000 ? ms : 60_000;
+}
+
 /** URL du SATCAT complet (registre du catalogue, propriétaires et lancements). */
 export function satcatUrl(): string {
   return process.env.CELESTRAK_SATCAT_URL ?? 'https://celestrak.org/pub/satcat.csv';
