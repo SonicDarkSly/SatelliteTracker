@@ -65,6 +65,7 @@ export const STORAGE_KEYS = {
   catalog: 'sattracker.catalog.v1',
   filters: 'sattracker.filters.v1',
   favorites: 'sattracker.favorites.v1',
+  legend: 'sattracker.legend.v1',
   // v2 : les réglages de taille ont changé de signification (valeurs
   // indépendantes, exprimées en pixels en vue globe). Conserver les anciennes
   // aurait donné des marqueurs démesurés.

@@ -13,6 +13,7 @@ import { Alert, ConfigProvider, Drawer, Spin, theme } from 'antd';
 import frFR from 'antd/locale/fr_FR';
 import { GlobeView } from './components/GlobeView';
 import { FiltersPanel } from './components/FiltersPanel';
+import { LegendPanel } from './components/LegendPanel';
 import { SatelliteDetails } from './components/SatelliteDetails';
 import { SettingsPanel } from './components/SettingsPanel';
 import { StatusBar } from './components/StatusBar';
@@ -45,6 +46,8 @@ export default function App(): JSX.Element {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [favorites, setFavorites] = useLocalStorage<string[]>(STORAGE_KEYS.favorites, []);
+  // Légende ouverte ou non : mémorisée, c'est une préférence d'affichage durable.
+  const [legendOpen, setLegendOpen] = useLocalStorage<boolean>(STORAGE_KEYS.legend, false);
 
   // Conteneur d'accueil des attributions Cesium, monté dans la barre d'état :
   // le logo et les crédits quittent ainsi la surface du globe.
@@ -164,6 +167,8 @@ export default function App(): JSX.Element {
           onRefresh={() => refresh(true)}
           onToggleFilters={() => setFiltersOpen(true)}
           onToggleSettings={() => setSettingsOpen(true)}
+          onToggleLegend={() => setLegendOpen(!legendOpen)}
+          legendOpen={legendOpen}
           activeFilterCount={activeFilterCount}
         />
 
@@ -259,6 +264,16 @@ export default function App(): JSX.Element {
               message="Catalogue incomplet"
               description={snapshot.warnings.join(' · ')}
             />
+          )}
+
+          {legendOpen && snapshot && (
+            <aside className="left-dock">
+              <LegendPanel
+                categories={snapshot.categories}
+                showShapes={settings.satelliteIcons}
+                onClose={() => setLegendOpen(false)}
+              />
+            </aside>
           )}
 
           {selected && (

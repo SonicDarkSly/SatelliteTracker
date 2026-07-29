@@ -295,13 +295,26 @@ function opaqueBounds(
   return maxX < 0 ? undefined : { minX, minY, maxX, maxY };
 }
 
+/** Emprise visée par les silhouettes, sur les 64 px du cadre. */
+const TARGET_EXTENT = 56;
+
 /**
- * Fabrique la texture d'une silhouette, recentrée sur son emprise visible.
+ * Fabrique la texture d'une silhouette : dessin, puis recentrage et mise à
+ * l'échelle mesurés sur le résultat.
  *
- * Le recentrage est mesuré et non calculé à la main : un marqueur est ancré en
- * son centre, et un dessin décalé de quelques pixels dans son cadre déplace
- * visuellement le satellite par rapport à sa position réelle. Le faire
- * automatiquement évite d'avoir à ajuster chaque silhouette — et de se tromper.
+ * Les deux corrections sont automatiques, et pas ajustées à la main, pour deux
+ * raisons distinctes :
+ *
+ * — Le **recentrage** : un marqueur est ancré en son centre, donc un dessin
+ *   décalé dans son cadre déplace visuellement le satellite par rapport à sa
+ *   position réelle. Le calcul a rattrapé un décalage de 11 px sur la silhouette
+ *   d'observation, dont le panneau ne s'étend que d'un côté.
+ *
+ * — La **mise à l'échelle** : les silhouettes n'occupent pas naturellement la
+ *   même part de leur cadre — 52 px pour une station, 21 px pour un débris. Sans
+ *   normalisation, un débris serait deux fois plus petit qu'une station à réglage
+ *   de taille identique, alors que la taille du marqueur est une préférence
+ *   d'affichage et non une échelle physique.
  */
 function render(shape: IconShape): string {
   const canvas = document.createElement('canvas');
@@ -318,20 +331,40 @@ function render(shape: IconShape): string {
 
   const bounds = opaqueBounds(ctx);
   if (bounds) {
-    const dx = C - (bounds.minX + bounds.maxX + 1) / 2;
-    const dy = C - (bounds.minY + bounds.maxY + 1) / 2;
-    if (Math.abs(dx) >= 0.5 || Math.abs(dy) >= 0.5) {
-      ctx.clearRect(0, 0, SIZE, SIZE);
-      ctx.save();
-      ctx.translate(dx, dy);
-      ctx.fillStyle = '#ffffff';
-      PAINTERS[shape](ctx);
-      ctx.restore();
-    }
+    const width = bounds.maxX - bounds.minX + 1;
+    const height = bounds.maxY - bounds.minY + 1;
+    const scale = TARGET_EXTENT / Math.max(width, height);
+    const cx = (bounds.minX + bounds.maxX + 1) / 2;
+    const cy = (bounds.minY + bounds.maxY + 1) / 2;
+
+    ctx.clearRect(0, 0, SIZE, SIZE);
+    ctx.save();
+    ctx.translate(C, C);
+    ctx.scale(scale, scale);
+    ctx.translate(-cx, -cy);
+    ctx.fillStyle = '#ffffff';
+    PAINTERS[shape](ctx);
+    ctx.restore();
   }
 
   return canvas.toDataURL('image/png');
 }
+
+/** Libellés FR des silhouettes, pour la légende. */
+export const SHAPE_LABELS: Record<IconShape, string> = {
+  station: 'Station spatiale habitée',
+  capsule: 'Vaisseau de ravitaillement',
+  flat: 'Constellation en orbite basse',
+  nav: 'Navigation par satellite',
+  dish: 'Télécommunications',
+  observer: 'Observation de la Terre, météo',
+  telescope: 'Télescope, observatoire',
+  cube: 'CubeSat, nanosatellite',
+  booster: 'Étage de lanceur',
+  debris: 'Débris',
+  sphere: 'Sphère de calibration',
+  default: 'Autre ou non identifié',
+};
 
 /** Textures indexées par silhouette, construites une seule fois. */
 export const SATELLITE_ICONS: Record<IconShape, string> = Object.fromEntries(

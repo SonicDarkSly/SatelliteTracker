@@ -4,6 +4,7 @@ import {
   FilterOutlined,
   ReloadOutlined,
   SettingOutlined,
+  TagsOutlined,
 } from '@ant-design/icons';
 import { AutoComplete, Button, Select, Space, Tooltip, Typography } from 'antd';
 import { TIME_RATES } from '../constants';
@@ -24,6 +25,8 @@ interface Props {
   onRefresh: () => void;
   onToggleFilters: () => void;
   onToggleSettings: () => void;
+  onToggleLegend: () => void;
+  legendOpen: boolean;
   /** Nombre de filtres actifs, affiché sur le bouton. */
   activeFilterCount: number;
 }
@@ -51,6 +54,8 @@ export function TopBar({
   onRefresh,
   onToggleFilters,
   onToggleSettings,
+  onToggleLegend,
+  legendOpen,
   activeFilterCount,
 }: Props): JSX.Element {
   return (
@@ -61,6 +66,13 @@ export function TopBar({
         </Button>
         <Tooltip title="Réglages d'affichage">
           <Button icon={<SettingOutlined />} onClick={onToggleSettings} />
+        </Tooltip>
+        <Tooltip title="Légende des couleurs et des formes">
+          <Button
+            icon={<TagsOutlined />}
+            onClick={onToggleLegend}
+            type={legendOpen ? 'primary' : 'default'}
+          />
         </Tooltip>
         <Text strong className="brand">
           SatelliteTracker
