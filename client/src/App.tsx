@@ -145,15 +145,23 @@ export default function App(): JSX.Element {
             simNow={propagation.simNow}
           />
 
+          {/* `tip` n'est accepté par Spin qu'autour d'un contenu : le libellé est
+              donc rendu à côté, ce qui évite l'avertissement d'Ant Design. */}
           {loading && (
             <div className="overlay">
-              <Spin size="large" tip="Récupération des éléments orbitaux…" />
+              <div className="overlay-stack">
+                <Spin size="large" />
+                <span>Récupération des éléments orbitaux…</span>
+              </div>
             </div>
           )}
 
-          {!loading && satellites && !propagation.ready && (
+          {!loading && satellites && satellites.length > 0 && !propagation.ready && (
             <div className="overlay overlay-soft">
-              <Spin tip="Initialisation de la propagation SGP4…" />
+              <div className="overlay-stack">
+                <Spin />
+                <span>Initialisation de la propagation SGP4…</span>
+              </div>
             </div>
           )}
 
@@ -168,7 +176,33 @@ export default function App(): JSX.Element {
             />
           )}
 
-          {!error && snapshot && snapshot.warnings.length > 0 && (
+          {/* Catalogue vide : c'est la seule information utile à afficher, et il
+              faut expliquer pourquoi plutôt que laisser un globe désert. */}
+          {!error && !loading && satellites?.length === 0 && (
+            <Alert
+              className="floating-alert"
+              type="error"
+              showIcon
+              message="Aucun objet à afficher"
+              description={
+                <>
+                  {snapshot?.warnings.length ? (
+                    <div>{snapshot.warnings.join(' · ')}</div>
+                  ) : (
+                    <div>Les sources d’éléments orbitaux n’ont renvoyé aucune donnée.</div>
+                  )}
+                  <div className="alert-hint">
+                    Celestrak limite le débit et refuse l’accès pendant une à deux heures
+                    après trop de requêtes. Le serveur retentera automatiquement. Pour
+                    travailler sans attendre, déposez un fichier <code>.tle</code> dans{' '}
+                    <code>server/data/tle/</code>.
+                  </div>
+                </>
+              }
+            />
+          )}
+
+          {!error && snapshot && snapshot.count > 0 && snapshot.warnings.length > 0 && (
             <Alert
               className="floating-alert"
               type="warning"

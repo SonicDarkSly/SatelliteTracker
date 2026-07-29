@@ -38,6 +38,9 @@ const FORCE_MIN_INTERVAL_MS = 5 * 60 * 1000;
  */
 const MIN_PLAUSIBLE_CATALOG = 1000;
 
+/** Délai avant de retenter quand toutes les sources sont muettes (1 min). */
+const EMPTY_RETRY_INTERVAL_MS = 60 * 1000;
+
 @Injectable()
 export class SatelliteCatalogService {
   private readonly logger = new Logger(SatelliteCatalogService.name);
@@ -52,6 +55,9 @@ export class SatelliteCatalogService {
    * donc du dernier lot connu pour les sources défaillantes.
    */
   private readonly lastGoodLots = new Map<string, SatelliteRecord[]>();
+
+  /** Dernier instantané vide, pour ne pas relancer les sources à chaque requête. */
+  private lastEmpty: { snapshot: CatalogSnapshot; attemptedAt: number } | undefined;
 
   constructor(
     @Inject(TLE_SOURCES) private readonly sources: TleSourcePort[],
@@ -83,6 +89,20 @@ export class SatelliteCatalogService {
           `cache conservé, nouvelle tentative possible dans ${seconds} s.`,
       );
       return cached.snapshot;
+    }
+
+    /*
+     * Aucune donnée disponible et tentative récente : on renvoie l'instantané
+     * vide déjà obtenu. Sans ce garde-fou, chaque rechargement de page relançait
+     * un cycle complet de sources (pauses de courtoisie incluses) pour aboutir au
+     * même résultat vide.
+     */
+    if (
+      this.lastEmpty &&
+      Date.now() - this.lastEmpty.attemptedAt < EMPTY_RETRY_INTERVAL_MS &&
+      !cached
+    ) {
+      return this.lastEmpty.snapshot;
     }
 
     if (this.inFlight) return this.inFlight;
@@ -184,6 +204,9 @@ export class SatelliteCatalogService {
     // Un résultat incomplet et invraisemblablement petit est affiché mais jamais
     // persisté : il serait ensuite servi depuis le disque pendant des heures.
     const suspicious = warnings.length > 0 && satellites.length < MIN_PLAUSIBLE_CATALOG;
+    this.lastEmpty =
+      satellites.length === 0 ? { snapshot, attemptedAt: Date.now() } : undefined;
+
     if (satellites.length > 0 && !suspicious) {
       this.cache.write(snapshot);
     } else if (suspicious) {

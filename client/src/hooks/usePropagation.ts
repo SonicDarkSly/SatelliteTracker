@@ -117,9 +117,24 @@ export function usePropagation(satellites: SatelliteRecord[] | undefined): Propa
 
   // Chargement du catalogue dans le worker dès qu'il est disponible.
   useEffect(() => {
-    if (!workerRef.current || !satellites || satellites.length === 0) return;
-    setReady(false);
+    if (!workerRef.current || !satellites) return;
+
     frameRef.current = undefined;
+
+    /*
+     * Catalogue vide (sources indisponibles) : il n'y a rien à propager, mais il
+     * faut malgré tout se déclarer prêt. Sinon l'interface reste bloquée sur
+     * « initialisation de la propagation » indéfiniment, alors que le vrai
+     * problème est l'absence de données — message que l'utilisateur ne voit
+     * jamais, caché derrière le voile de chargement.
+     */
+    if (satellites.length === 0) {
+      setReady(true);
+      setPropagableCount(0);
+      return;
+    }
+
+    setReady(false);
     workerRef.current.postMessage({
       type: 'init',
       tles: satellites.map((s) => ({ line1: s.line1, line2: s.line2 })),

@@ -150,6 +150,28 @@ body {
   pointer-events: none;
 }
 
+.overlay-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  color: rgba(230, 233, 239, 0.8);
+}
+
+.alert-hint {
+  margin-top: 6px;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.alert-hint code {
+  padding: 1px 4px;
+  background: rgba(255, 255, 255, 0.09);
+  border-radius: 3px;
+  font-size: 11px;
+}
+
 .floating-alert {
   position: absolute;
   top: 12px;
