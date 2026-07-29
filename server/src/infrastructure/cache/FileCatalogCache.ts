@@ -16,7 +16,16 @@ import { JsonFileStore } from './JsonFileStore.js';
 @Injectable()
 export class FileCatalogCache implements CatalogCachePort {
   private readonly logger = new Logger(FileCatalogCache.name);
-  private readonly store = new JsonFileStore<CatalogSnapshot>(join(dataDir(), 'catalog.json'));
+  /**
+   * Version 2 : les enregistrements portent un bloc `omm` là où la version 1
+   * stockait les deux lignes d'un TLE.
+   *
+   * Le numéro de version doit être incrémenté à **chaque** changement de forme des
+   * enregistrements. Sans cela, un fichier écrit par une version précédente est
+   * relu tel quel et servi au client, qui reçoit des objets amputés du champ dont
+   * il a besoin — panne totale et silencieuse, sans le moindre message d'erreur.
+   */
+  private readonly store = new JsonFileStore<CatalogSnapshot>(join(dataDir(), 'catalog.json'), 2);
   private entry: CachedCatalog | undefined;
   private loaded = false;
 
@@ -27,6 +36,14 @@ export class FileCatalogCache implements CatalogCachePort {
     this.loaded = true;
     const stored = this.store.read();
     if (!stored?.payload?.satellites?.length) return undefined;
+
+    // Ceinture et bretelles : on vérifie aussi la forme réelle du premier
+    // enregistrement. Un fichier au bon numéro de version mais au mauvais
+    // contenu (édition manuelle, version intermédiaire) serait sinon servi.
+    if (!stored.payload.satellites[0]?.omm) {
+      this.logger.warn('Catalogue en cache sans éléments OMM — ignoré, une récupération suivra.');
+      return undefined;
+    }
 
     const ageMinutes = Math.round((Date.now() - stored.storedAt) / 60_000);
     this.logger.log(
