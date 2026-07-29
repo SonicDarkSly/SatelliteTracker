@@ -58,13 +58,48 @@ if curl -s --max-time 2 http://localhost:3001/api/health | grep -q ok; then
   sleep 2
 fi
 
-# Vérification des dépendances (node_modules complet ?)
+# Binaires natifs attendus pour CETTE machine. Vite s'appuie sur rollup et esbuild,
+# qui embarquent du code compilé par plateforme : un node_modules copié depuis une
+# autre machine (ou installé dans un conteneur) fait échouer le client au démarrage
+# avec « Cannot find module @rollup/rollup-… ». On le détecte avant de lancer.
+case "$(uname -s)-$(uname -m)" in
+  Darwin-arm64)  NATIF_ROLLUP="rollup-darwin-arm64";     NATIF_ESBUILD="darwin-arm64" ;;
+  Darwin-x86_64) NATIF_ROLLUP="rollup-darwin-x64";       NATIF_ESBUILD="darwin-x64" ;;
+  Linux-x86_64)  NATIF_ROLLUP="rollup-linux-x64-gnu";    NATIF_ESBUILD="linux-x64" ;;
+  Linux-aarch64) NATIF_ROLLUP="rollup-linux-arm64-gnu";  NATIF_ESBUILD="linux-arm64" ;;
+  *)             NATIF_ROLLUP="";                        NATIF_ESBUILD="" ;;
+esac
+
+# Le paquet doit contenir son binaire .node / son exécutable, pas seulement le dossier.
+natifs_ok() {
+  [ -z "$NATIF_ROLLUP" ] && return 0  # plateforme non reconnue : on ne bloque pas
+  ls node_modules/@rollup/"$NATIF_ROLLUP"/*.node >/dev/null 2>&1 \
+    && [ -x "node_modules/@esbuild/$NATIF_ESBUILD/bin/esbuild" ]
+}
+
+# Vérification des dépendances (node_modules complet et adapté à la machine ?)
 echo "🔍 Vérification des dépendances…"
+BESOIN_INSTALL=0
 if [ ! -d node_modules ] || [ ! -e node_modules/.bin/vite ] || [ ! -e node_modules/.bin/tsc ] \
    || [ ! -d node_modules/cesium ]; then
   echo "📦 Dépendances manquantes ou incomplètes — installation (quelques minutes)…"
+  BESOIN_INSTALL=1
+elif ! natifs_ok; then
+  echo "📦 node_modules ne correspond pas à cette machine ($(uname -s) $(uname -m))."
+  echo "   Réinstallation propre (npm et ses dépendances optionnelles par plateforme)…"
+  rm -rf node_modules package-lock.json
+  BESOIN_INSTALL=1
+fi
+
+if [ "$BESOIN_INSTALL" = "1" ]; then
   echo "   Cesium et ses textures représentent l'essentiel du téléchargement."
   npm install
+  if ! natifs_ok; then
+    echo "❌ Les binaires natifs de rollup/esbuild sont toujours absents."
+    echo "   Réessayer : rm -rf node_modules package-lock.json && npm install"
+    read -r -p "Appuie sur Entrée pour fermer… "
+    exit 1
+  fi
   echo "✅ Dépendances installées."
 else
   echo "✅ Dépendances déjà installées (node_modules complet)."
