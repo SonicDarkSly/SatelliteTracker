@@ -107,6 +107,14 @@ export interface SourceStatus {
   readonly count: number;
   readonly ok: boolean;
   readonly error?: string;
+  /**
+   * Instant (ISO) avant lequel toute nouvelle tentative est inutile.
+   *
+   * Transmis au client pour qu'il affiche un décompte vivant et redemande le
+   * catalogue au bon moment. Sans cela, le message d'erreur restait figé à
+   * l'écran sans que rien ne semble se passer.
+   */
+  readonly retryAt?: string;
 }
 
 /**

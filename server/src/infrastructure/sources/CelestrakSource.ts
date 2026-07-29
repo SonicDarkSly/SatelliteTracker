@@ -143,6 +143,13 @@ export class CelestrakSource implements TleSourcePort {
 
   private failure(error: string, log = true): TleFetchResult {
     if (log) this.logger.warn(`${this.id} : ${error}`);
-    return { sourceId: this.id, label: this.label, satellites: [], ok: false, error };
+    return {
+      sourceId: this.id,
+      label: this.label,
+      satellites: [],
+      ok: false,
+      error,
+      retryAt: this.blockedUntil > Date.now() ? this.blockedUntil : undefined,
+    };
   }
 }

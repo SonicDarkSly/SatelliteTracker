@@ -229,6 +229,7 @@ export class SatelliteCatalogService {
         count: fallback?.length ?? 0,
         ok: false,
         error: result.error,
+        retryAt: result.retryAt ? new Date(result.retryAt).toISOString() : undefined,
       });
       warnings.push(
         fallback

@@ -545,3 +545,12 @@ body {
     max-height: 45%;
   }
 }
+
+.alert-countdown {
+  margin-top: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.alert-action {
+  margin-top: 8px;
+}

@@ -103,6 +103,8 @@ export interface SourceStatus {
   count: number;
   ok: boolean;
   error?: string;
+  /** Instant (ISO) de la prochaine tentative utile, pour le décompte affiché. */
+  retryAt?: string;
 }
 
 export interface CatalogSnapshot {

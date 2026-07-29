@@ -16,20 +16,17 @@ export interface CelestrakGroup {
 }
 
 /**
- * Groupes récupérés par défaut :
- *   active    — tout le catalogue des objets actifs (~16 000 objets)
- *   stations  — ISS, CSS et véhicules amarrés (petit fichier, étiquetage fiable)
+ * Groupe récupéré par défaut : `active`, c'est-à-dire tout le catalogue des
+ * objets actifs (~16 000 objets).
  *
- * Volontairement limité à deux requêtes. `active` contient déjà tout le reste ;
- * chaque groupe supplémentaire ne fait qu'affiner l'étiquetage tout en
- * rapprochant de la limite de débit de Celestrak, qui répond 403 pendant une
- * heure quand elle est atteinte. Surchargeable via
- * CELESTRAK_GROUPS="active,stations,visual,last-30-days".
+ * Une seule requête, volontairement. `active` contient déjà les stations, les
+ * constellations et le reste ; les groupes supplémentaires n'affinaient que
+ * l'étiquetage, que les règles de nom couvrent désormais. Or Celestrak limite le
+ * débit en nombre de requêtes et répond 403 pendant un long moment quand la
+ * limite est atteinte : diviser le nombre d'appels par deux réduit d'autant le
+ * risque. Surchargeable via CELESTRAK_GROUPS="active,stations,visual".
  */
-export const DEFAULT_GROUPS: CelestrakGroup[] = [
-  { id: 'active', label: 'Catalogue actif' },
-  { id: 'stations', label: 'Stations spatiales' },
-];
+export const DEFAULT_GROUPS: CelestrakGroup[] = [{ id: 'active', label: 'Catalogue actif' }];
 
 const GROUP_LABELS: Record<string, string> = {
   active: 'Catalogue actif',

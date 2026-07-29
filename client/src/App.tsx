@@ -14,6 +14,7 @@ import frFR from 'antd/locale/fr_FR';
 import { GlobeView } from './components/GlobeView';
 import { FiltersPanel } from './components/FiltersPanel';
 import { LegendPanel } from './components/LegendPanel';
+import { SourceAlert } from './components/SourceAlert';
 import { SatelliteDetails } from './components/SatelliteDetails';
 import { SettingsPanel } from './components/SettingsPanel';
 import { StatusBar } from './components/StatusBar';
@@ -23,12 +24,7 @@ import { useLocalStorage } from './hooks/useLocalStorage';
 import { usePropagation } from './hooks/usePropagation';
 import { useSatelliteFilters } from './hooks/useSatelliteFilters';
 import { useSettings } from './hooks/useSettings';
-import {
-  DEFAULT_HIDDEN_CATEGORIES,
-  MIN_USABLE_CATALOG,
-  ORBIT_BATCH_MAX,
-  STORAGE_KEYS,
-} from './constants';
+import { DEFAULT_HIDDEN_CATEGORIES, ORBIT_BATCH_MAX, STORAGE_KEYS } from './constants';
 
 export default function App(): JSX.Element {
   const { snapshot, loading, refreshing, error, refresh } = useCatalog();
@@ -105,16 +101,6 @@ export default function App(): JSX.Element {
         : [...favorites, selected.noradId],
     );
   }, [favorites, selected, setFavorites]);
-
-  /**
-   * Catalogue réellement dégradé : trop peu d'objets pour être exploitable, ou
-   * servi depuis une copie périmée. Un simple groupe secondaire manquant ne
-   * compte pas — le catalogue « active » contient déjà tout.
-   */
-  const degraded =
-    snapshot !== undefined &&
-    snapshot.warnings.length > 0 &&
-    (snapshot.stale || snapshot.count < MIN_USABLE_CATALOG);
 
   /**
    * Réglages demandés par l'utilisateur mais suspendus à cette échelle.
@@ -246,47 +232,10 @@ export default function App(): JSX.Element {
             </div>
           )}
 
-          {/* Catalogue vide : c'est la seule information utile à afficher, et il
-              faut expliquer pourquoi plutôt que laisser un globe désert. */}
-          {!error && !loading && !snapshot?.fetching && satellites?.length === 0 && (
-            <Alert
-              className="floating-alert"
-              type="error"
-              showIcon
-              message="Aucun objet à afficher"
-              description={
-                <>
-                  {snapshot?.warnings.length ? (
-                    <div>{snapshot.warnings.join(' · ')}</div>
-                  ) : (
-                    <div>Les sources d’éléments orbitaux n’ont renvoyé aucune donnée.</div>
-                  )}
-                  <div className="alert-hint">
-                    Celestrak limite le débit et refuse l’accès pendant une à deux heures
-                    après trop de requêtes. Le serveur retentera automatiquement. Pour
-                    travailler sans attendre, déposez un fichier <code>.tle</code> dans{' '}
-                    <code>server/data/tle/</code>.
-                  </div>
-                </>
-              }
-            />
-          )}
-
-          {/*
-            Bandeau réservé aux catalogues réellement dégradés. Un groupe
-            secondaire manquant alors que le catalogue principal est là ne
-            justifie pas d'alerte plein écran : l'information reste consultable
-            dans la barre d'état, où le détail des sources est affiché.
-          */}
-          {!error && snapshot && degraded && (
-            <Alert
-              className="floating-alert"
-              type="warning"
-              showIcon
-              closable
-              message="Catalogue incomplet"
-              description={snapshot.warnings.join(' · ')}
-            />
+          {/* Indisponibilité des sources : décompte vivant et relance
+              automatique à l'échéance, plutôt qu'un message figé. */}
+          {!error && !loading && !snapshot?.fetching && snapshot && (
+            <SourceAlert snapshot={snapshot} onRetry={() => refresh(false)} />
           )}
 
           {legendOpen && snapshot && (

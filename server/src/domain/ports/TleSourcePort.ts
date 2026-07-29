@@ -7,6 +7,8 @@ export interface TleFetchResult {
   readonly satellites: SatelliteRecord[];
   readonly ok: boolean;
   readonly error?: string;
+  /** Instant (ms epoch) avant lequel réessayer est inutile. */
+  readonly retryAt?: number;
 }
 
 /**
