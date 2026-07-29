@@ -10,16 +10,24 @@ import { DEFAULT_HEADERS, fetchWithRetry } from '../http/fetch.js';
 import { celestrakGroupUrl, maxEpochAgeDays } from '../config/celestrak.js';
 
 /**
- * Durée d'attente après un blocage (HTTP 403). Celestrak bloque temporairement
- * les clients qui redemandent les mêmes données trop souvent ; insister ne fait
- * que prolonger le blocage.
+ * Attente après un blocage (HTTP 403), progressive.
+ *
+ * Celestrak bloque temporairement les clients trop insistants, sans annoncer la
+ * durée. Une attente fixe d'une heure était le mauvais compromis : plus longue
+ * que le blocage réel dans bien des cas, elle prolongeait inutilement la panne
+ * côté utilisateur. On sonde donc au bout de 10 min, puis on double à chaque
+ * échec jusqu'à 2 h — assez espacé pour ne pas être abusif, assez tôt pour
+ * repartir vite dès que l'accès revient.
  */
-const BLOCK_BACKOFF_MS = 60 * 60 * 1000;
+const BLOCK_BACKOFF_INITIAL_MS = 10 * 60 * 1000;
+const BLOCK_BACKOFF_MAX_MS = 2 * 60 * 60 * 1000;
 
 export class CelestrakSource implements TleSourcePort {
   private readonly logger = new Logger(CelestrakSource.name);
   /** Instant avant lequel toute nouvelle tentative est inutile. */
   private blockedUntil = 0;
+  /** Attente courante, doublée à chaque 403 consécutif. */
+  private backoffMs = BLOCK_BACKOFF_INITIAL_MS;
 
   constructor(
     readonly id: string,
@@ -41,10 +49,12 @@ export class CelestrakSource implements TleSourcePort {
       const response = await fetchWithRetry(url, { headers: DEFAULT_HEADERS });
 
       if (response.status === 403) {
-        this.blockedUntil = Date.now() + BLOCK_BACKOFF_MS;
+        this.blockedUntil = Date.now() + this.backoffMs;
+        const minutes = Math.round(this.backoffMs / 60_000);
+        this.backoffMs = Math.min(this.backoffMs * 2, BLOCK_BACKOFF_MAX_MS);
         return this.failure(
           'HTTP 403 — Celestrak limite le débit (trop de requêtes récentes). ' +
-            'Les données en cache restent utilisées ; nouvelle tentative dans 1 h.',
+            `Les données en cache restent utilisées ; nouvelle tentative dans ${minutes} min.`,
         );
       }
 
@@ -62,6 +72,9 @@ export class CelestrakSource implements TleSourcePort {
 
       const { satellites, skipped } = parseTleCatalog(text);
       const fresh = this.dropStaleEpochs(satellites);
+
+      // Accès rétabli : on repart de l'attente initiale pour le prochain incident.
+      this.backoffMs = BLOCK_BACKOFF_INITIAL_MS;
 
       this.logger.log(
         `${this.id} : ${fresh.length} objets` +
