@@ -20,6 +20,36 @@ export interface CatalogState {
   refresh: (force?: boolean) => void;
 }
 
+/**
+ * Requête en cours, partagée par tous les montages du hook.
+ *
+ * StrictMode monte deux fois les effets en développement, et le rechargement à
+ * chaud de Vite remonte l'application à chaque édition : sans cette
+ * mutualisation, chaque montage retélécharge plusieurs mégaoctets et relance un
+ * cycle de sources côté serveur.
+ */
+let pending: Promise<CatalogSnapshot> | undefined;
+
+function loadCatalog(force: boolean): Promise<CatalogSnapshot> {
+  if (!force && pending) return pending;
+
+  const request = (
+    force
+      ? fetch('/api/satellites/refresh', { method: 'POST' })
+      : fetch('/api/satellites')
+  )
+    .then((response) => {
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response.json() as Promise<CatalogSnapshot>;
+    })
+    .finally(() => {
+      if (pending === request) pending = undefined;
+    });
+
+  pending = request;
+  return request;
+}
+
 export function useCatalog(): CatalogState {
   const [snapshot, setSnapshot] = useState<CatalogSnapshot | undefined>();
   const [loading, setLoading] = useState(true);
@@ -32,13 +62,7 @@ export function useCatalog(): CatalogState {
     setError(undefined);
 
     try {
-      const response = force
-        ? await fetch('/api/satellites/refresh', { method: 'POST' })
-        : await fetch('/api/satellites');
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-      const data = (await response.json()) as CatalogSnapshot;
-      setSnapshot(data);
+      setSnapshot(await loadCatalog(force));
     } catch (err) {
       setError(
         err instanceof Error ? `Catalogue indisponible : ${err.message}` : 'Catalogue indisponible.',

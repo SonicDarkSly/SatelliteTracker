@@ -38,8 +38,12 @@ const FORCE_MIN_INTERVAL_MS = 5 * 60 * 1000;
  */
 const MIN_PLAUSIBLE_CATALOG = 1000;
 
-/** Délai avant de retenter quand toutes les sources sont muettes (1 min). */
-const EMPTY_RETRY_INTERVAL_MS = 60 * 1000;
+/**
+ * Délai avant de retenter après un résultat non exploitable (5 min).
+ * Assez court pour se rétablir vite quand une source revient, assez long pour
+ * qu'un rechargement de page en boucle ne se traduise pas en requêtes réseau.
+ */
+const UNUSABLE_RETRY_INTERVAL_MS = 5 * 60 * 1000;
 
 @Injectable()
 export class SatelliteCatalogService {
@@ -56,8 +60,17 @@ export class SatelliteCatalogService {
    */
   private readonly lastGoodLots = new Map<string, SatelliteRecord[]>();
 
-  /** Dernier instantané vide, pour ne pas relancer les sources à chaque requête. */
-  private lastEmpty: { snapshot: CatalogSnapshot; attemptedAt: number } | undefined;
+  /**
+   * Dernier résultat non exploitable (vide, ou trop incomplet pour être mis en
+   * cache), avec l'heure de la tentative.
+   *
+   * Sans lui, l'absence de mise en cache se transforme en boucle : chaque requête
+   * du client relance un cycle complet de sources, puisqu'il n'y a rien à servir.
+   * Mesuré sur le journal réel : 71 appels à Celestrak avec une médiane de 11 s
+   * entre deux, dont un à 1 s d'intervalle — de quoi déclencher la limite de débit
+   * et rester bloqué. C'est ce qui est arrivé.
+   */
+  private lastUnusable: { snapshot: CatalogSnapshot; attemptedAt: number } | undefined;
 
   constructor(
     @Inject(TLE_SOURCES) private readonly sources: TleSourcePort[],
@@ -92,17 +105,16 @@ export class SatelliteCatalogService {
     }
 
     /*
-     * Aucune donnée disponible et tentative récente : on renvoie l'instantané
-     * vide déjà obtenu. Sans ce garde-fou, chaque rechargement de page relançait
-     * un cycle complet de sources (pauses de courtoisie incluses) pour aboutir au
-     * même résultat vide.
+     * Résultat non exploitable obtenu récemment : on le resserre tel quel plutôt
+     * que de relancer les sources. Vaut aussi bien pour un catalogue vide que pour
+     * un catalogue trop incomplet — les deux cas ne sont pas mis en cache, et sans
+     * ce garde-fou l'absence de cache devient une boucle de requêtes.
      */
     if (
-      this.lastEmpty &&
-      Date.now() - this.lastEmpty.attemptedAt < EMPTY_RETRY_INTERVAL_MS &&
-      !cached
+      this.lastUnusable &&
+      Date.now() - this.lastUnusable.attemptedAt < UNUSABLE_RETRY_INTERVAL_MS
     ) {
-      return this.lastEmpty.snapshot;
+      return this.lastUnusable.snapshot;
     }
 
     if (this.inFlight) return this.inFlight;
@@ -204,15 +216,19 @@ export class SatelliteCatalogService {
     // Un résultat incomplet et invraisemblablement petit est affiché mais jamais
     // persisté : il serait ensuite servi depuis le disque pendant des heures.
     const suspicious = warnings.length > 0 && satellites.length < MIN_PLAUSIBLE_CATALOG;
-    this.lastEmpty =
-      satellites.length === 0 ? { snapshot, attemptedAt: Date.now() } : undefined;
+    const usable = satellites.length > 0 && !suspicious;
 
-    if (satellites.length > 0 && !suspicious) {
+    // Tout résultat non mis en cache est mémorisé ici : c'est ce qui empêche la
+    // boucle de requêtes décrite sur `lastUnusable`.
+    this.lastUnusable = usable ? undefined : { snapshot, attemptedAt: Date.now() };
+
+    if (usable) {
       this.cache.write(snapshot);
     } else if (suspicious) {
       this.logger.warn(
         `Catalogue de ${satellites.length} objets avec avertissements — non mis en cache ` +
-          '(une source majeure a échoué, le résultat serait trompeur).',
+          `(une source majeure a échoué). Nouvelle tentative dans ` +
+          `${UNUSABLE_RETRY_INTERVAL_MS / 60_000} min au plus tôt.`,
       );
     }
 

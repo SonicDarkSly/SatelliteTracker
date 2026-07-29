@@ -25,6 +25,15 @@ CQRS côté serveur, React + Vite + Ant Design côté client, lanceurs double-cl
   de moins de 1 000 objets n'est pas mis en cache, et un résultat 10 % plus pauvre que le
   cache existant ne le remplace pas. Sans ces règles, un seul 403 sur `active` fige un
   catalogue de 22 objets pendant des heures — c'est exactement le bug qu'on a eu.
+- **Corollaire indispensable : « pas mis en cache » ne doit jamais signifier « refait à
+  chaque requête ».** C'est le piège dans lequel on est tombé et la vraie cause du
+  blocage. Refuser de cacher un résultat inexploitable, sans mémoriser la tentative,
+  transforme chaque requête du client en cycle complet de sources. Mesuré sur le journal
+  réel : **71 appels à Celestrak, médiane de 11 s entre deux, un à 1 s d'intervalle.**
+  D'où `lastUnusable` dans `SatelliteCatalogService` (fenêtre de 5 min) et la
+  mutualisation de la requête dans `useCatalog` côté client (StrictMode et le
+  rechargement à chaud de Vite multiplient les montages). Vérifié : 30 requêtes client
+  rapprochées ⇒ **0 appel réseau supplémentaire**.
 - **Aucun calcul de position côté serveur.** C'est la décision d'architecture centrale :
   le serveur sert des TLE, le navigateur propage. Ne pas introduire de WebSocket qui
   pousserait des positions — ce serait un recul de deux ordres de grandeur en coût.
