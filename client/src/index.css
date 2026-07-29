@@ -73,6 +73,10 @@ body {
   width: 130px;
 }
 
+.basemap-select {
+  width: 150px;
+}
+
 /* --------------------------------- scène --------------------------------- */
 
 .stage {
@@ -81,20 +85,52 @@ body {
   min-height: 0;
 }
 
+.globe-wrapper,
 .globe-container {
   position: absolute;
   inset: 0;
 }
 
-/* Cesium ajoute ses propres styles : on neutralise ce qui gêne la mise en page. */
+/* Filet de sécurité : si Cesium recrée son bandeau de crédits sur le globe
+   (conteneur externe indisponible), on le masque — les attributions sont
+   affichées dans la barre d'état. */
 .globe-container .cesium-viewer-bottom {
-  bottom: 2px;
-  right: 8px;
+  display: none;
 }
 
-.globe-container .cesium-widget-credits {
-  font-size: 10px;
-  opacity: 0.5;
+/* -------------------------- info-bulle de survol ------------------------- */
+
+.globe-tooltip {
+  position: absolute;
+  z-index: 7;
+  pointer-events: none;
+  max-width: 280px;
+  padding: 7px 10px;
+  background: rgba(8, 12, 20, 0.94);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.45;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+}
+
+.globe-tooltip-name {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 600;
+  margin-bottom: 3px;
+}
+
+.globe-tooltip-meta {
+  color: rgba(230, 233, 239, 0.68);
+  font-variant-numeric: tabular-nums;
+}
+
+.globe-tooltip-hint {
+  margin-top: 4px;
+  color: rgba(230, 233, 239, 0.4);
+  font-size: 11px;
 }
 
 .overlay {
@@ -225,6 +261,45 @@ body {
   border-top: 1px solid var(--border);
   font-size: 12px;
   z-index: 10;
+}
+
+.statusbar-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.statusbar-sources {
+  flex: 1 1 auto;
+  min-width: 200px;
+}
+
+/* Crédits Cesium déportés ici : on les aligne sur la typographie de la barre. */
+.cesium-credit-host {
+  display: flex;
+  align-items: center;
+  opacity: 0.55;
+  font-size: 11px;
+}
+
+.cesium-credit-host .cesium-widget-credits,
+.cesium-credit-host .cesium-credit-textContainer,
+.cesium-credit-host .cesium-credit-logoContainer {
+  display: inline-flex !important;
+  align-items: center;
+  font-size: 11px;
+  color: inherit;
+}
+
+.cesium-credit-host img {
+  max-height: 14px;
+  width: auto;
+}
+
+.cesium-credit-host a {
+  color: inherit;
+  text-decoration: none;
 }
 
 .source-detail > div {

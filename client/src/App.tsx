@@ -7,10 +7,11 @@
  *   useSatelliteFilters masque de visibilité (aucune reconstruction de scène)
  *   GlobeView           rendu Cesium, lecture directe des tampons de positions
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, ConfigProvider, Drawer, Spin, theme } from 'antd';
 import frFR from 'antd/locale/fr_FR';
 import { GlobeView } from './components/GlobeView';
+import type { BaseMapKind } from './components/GlobeView';
 import { FiltersPanel } from './components/FiltersPanel';
 import { SatelliteDetails } from './components/SatelliteDetails';
 import { StatusBar } from './components/StatusBar';
@@ -31,8 +32,13 @@ export default function App(): JSX.Element {
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [focusNonce, setFocusNonce] = useState(0);
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [lighting, setLighting] = useLocalStorage<boolean>('sattracker.lighting.v1', true);
+  const [lighting, setLighting] = useLocalStorage<boolean>(STORAGE_KEYS.lighting, true);
+  const [baseMap, setBaseMap] = useLocalStorage<BaseMapKind>(STORAGE_KEYS.baseMap, 'satellite');
   const [favorites, setFavorites] = useLocalStorage<string[]>(STORAGE_KEYS.favorites, []);
+
+  // Conteneur d'accueil des attributions Cesium, monté dans la barre d'état :
+  // le logo et les crédits quittent ainsi la surface du globe.
+  const creditRef = useRef<HTMLDivElement>(null);
 
   // Horloge affichée : rafraîchie une fois par seconde (indépendante du rendu 60 Hz).
   const [clockMs, setClockMs] = useState(() => Date.now());
@@ -85,6 +91,8 @@ export default function App(): JSX.Element {
           onSeek={propagation.seek}
           lighting={lighting}
           onLighting={setLighting}
+          baseMap={baseMap}
+          onBaseMap={setBaseMap}
           refreshing={refreshing}
           onRefresh={() => refresh(true)}
           onToggleFilters={() => setFiltersOpen(true)}
@@ -100,6 +108,8 @@ export default function App(): JSX.Element {
             onSelect={setSelectedIndex}
             focusNonce={focusNonce}
             lighting={lighting}
+            baseMap={baseMap}
+            creditContainer={creditRef}
             simNow={propagation.simNow}
           />
 
@@ -149,10 +159,12 @@ export default function App(): JSX.Element {
         </main>
 
         <StatusBar
+          ref={creditRef}
           snapshot={snapshot}
           origin={origin}
           propagableCount={propagation.propagableCount}
           visibleCount={visibleCount}
+          baseMap={baseMap}
         />
 
         <Drawer

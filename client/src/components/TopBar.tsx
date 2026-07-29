@@ -1,7 +1,8 @@
 /** Barre supérieure : recherche, contrôle du temps, rafraîchissement. */
 import { ClockCircleOutlined, FilterOutlined, ReloadOutlined } from '@ant-design/icons';
 import { AutoComplete, Button, Select, Space, Switch, Tooltip, Typography } from 'antd';
-import { TIME_RATES } from '../constants';
+import { BASE_MAPS, TIME_RATES } from '../constants';
+import type { BaseMapKind } from './GlobeView';
 import type { SatelliteRecord } from '../types';
 
 const { Text } = Typography;
@@ -17,6 +18,8 @@ interface Props {
   onSeek: (offsetMinutes: number) => void;
   lighting: boolean;
   onLighting: (value: boolean) => void;
+  baseMap: BaseMapKind;
+  onBaseMap: (value: BaseMapKind) => void;
   refreshing: boolean;
   onRefresh: () => void;
   onToggleFilters: () => void;
@@ -43,6 +46,8 @@ export function TopBar({
   onSeek,
   lighting,
   onLighting,
+  baseMap,
+  onBaseMap,
   refreshing,
   onRefresh,
   onToggleFilters,
@@ -95,6 +100,15 @@ export function TopBar({
 
         <Tooltip title="Revenir à l'instant présent">
           <Button onClick={() => onSeek(0)}>Maintenant</Button>
+        </Tooltip>
+
+        <Tooltip title="Fond de carte">
+          <Select
+            value={baseMap}
+            onChange={onBaseMap}
+            className="basemap-select"
+            options={BASE_MAPS.map((b) => ({ value: b.value, label: b.label }))}
+          />
         </Tooltip>
 
         <Tooltip title="Éclairage jour / nuit">

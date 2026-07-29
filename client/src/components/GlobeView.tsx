@@ -2,21 +2,19 @@
  * Globe 3D (Cesium) et rendu des objets en orbite.
  *
  * Choix de rendu : une `PointPrimitiveCollection` unique plutôt que des entités
- * Cesium. Les entités sont pratiques mais coûtent trop cher à 11 000 objets
+ * Cesium. Les entités sont pratiques mais coûtent trop cher à 16 000 objets
  * rafraîchis 60 fois par seconde ; la collection de points est dessinée en un
  * seul appel GPU et se contente d'une écriture de position par objet.
  *
  * Les positions viennent du worker toutes les 500 ms ; entre deux trames, on
  * extrapole linéairement avec la vitesse (p + v·Δt), ce qui donne un mouvement
  * parfaitement fluide pour une erreur de l'ordre du mètre.
- *
- * Aucune clé Cesium ion n'est nécessaire : la texture Natural Earth II livrée
- * avec Cesium est utilisée comme fond de carte, tout fonctionne hors ligne.
  */
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Cartesian2,
   Cartesian3,
+  Cartographic,
   Color,
   HorizontalOrigin,
   ImageryLayer,
@@ -24,11 +22,14 @@ import {
   LabelCollection,
   LabelStyle,
   Material,
+  NearFarScalar,
+  OpenStreetMapImageryProvider,
   PointPrimitiveCollection,
   PolylineCollection,
   ScreenSpaceEventHandler,
   ScreenSpaceEventType,
   TileMapServiceImageryProvider,
+  UrlTemplateImageryProvider,
   VerticalOrigin,
   Viewer,
   buildModuleUrl,
@@ -38,6 +39,9 @@ import 'cesium/Build/Cesium/Widgets/widgets.css';
 import type { PropagationFrame } from '../hooks/usePropagation';
 import type { SatelliteRecord } from '../types';
 import { colorForCategories } from '../utils/format';
+
+/** Fonds de carte proposés. */
+export type BaseMapKind = 'satellite' | 'plan' | 'relief';
 
 interface Props {
   satellites: SatelliteRecord[] | undefined;
@@ -53,13 +57,76 @@ interface Props {
   focusNonce: number;
   /** Éclairage réaliste (terminateur jour/nuit). */
   lighting: boolean;
+  baseMap: BaseMapKind;
+  /**
+   * Conteneur d'accueil des crédits Cesium. En le fournissant, on sort le logo
+   * et les attributions du globe pour les afficher dans la barre d'état — les
+   * attributions restent visibles (c'est une obligation des fournisseurs de
+   * données), mais elles n'encombrent plus la vue.
+   */
+  creditContainer: React.RefObject<HTMLDivElement>;
   /** Instant simulé courant, pour synchroniser l'éclairage. */
   simNow: () => number;
 }
 
-/** Taille en pixels des points selon l'importance de l'objet. */
-const POINT_SIZE = 3.2;
-const SELECTED_POINT_SIZE = 11;
+/** Taille de base des points, en pixels (avant mise à l'échelle par distance). */
+const POINT_SIZE = 4;
+const SELECTED_POINT_SIZE = 10;
+
+/**
+ * Mise à l'échelle des points selon la distance à la caméra : un satellite
+ * survolé de près doit être gros et facile à viser, un satellite à l'autre bout
+ * du globe doit rester un point discret. Sans cela, tout reste minuscule dès
+ * qu'on zoome et devient impossible à cliquer.
+ */
+const POINT_SCALE = new NearFarScalar(6.0e5, 3.4, 4.5e7, 0.85);
+
+/** Tolérance de sélection, en pixels : viser un point de 4 px en mouvement est illusoire. */
+const PICK_TOLERANCE = 14;
+
+/** Cadence de rafraîchissement de l'info-bulle de survol (ms). */
+const HOVER_REFRESH_MS = 150;
+
+/** Rayon terrestre moyen (km), pour l'altitude affichée au survol. */
+const EARTH_RADIUS_KM = 6371;
+
+interface HoverInfo {
+  index: number;
+  /** Position de l'info-bulle, en pixels dans le conteneur. */
+  x: number;
+  y: number;
+  latitude: number;
+  longitude: number;
+  altitudeKm: number;
+  speedKmS: number;
+}
+
+/** Couche d'imagerie correspondant au fond choisi. */
+function createImagery(kind: BaseMapKind): ImageryLayer {
+  switch (kind) {
+    case 'satellite':
+      // Imagerie aérienne haute résolution, sans clé d'API.
+      return new ImageryLayer(
+        new UrlTemplateImageryProvider({
+          url: 'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+          maximumLevel: 18,
+          credit: 'Imagerie : Esri, Maxar, Earthstar Geographics',
+        }),
+      );
+    case 'plan':
+      return new ImageryLayer(
+        new OpenStreetMapImageryProvider({ url: 'https://tile.openstreetmap.org/' }),
+      );
+    case 'relief':
+    default:
+      // Texture Natural Earth II livrée avec Cesium : basse résolution mais
+      // disponible hors ligne et sans aucun appel réseau.
+      return ImageryLayer.fromProviderAsync(
+        TileMapServiceImageryProvider.fromUrl(buildModuleUrl('Assets/Textures/NaturalEarthII')),
+        {},
+      );
+  }
+}
 
 export function GlobeView({
   satellites,
@@ -70,6 +137,8 @@ export function GlobeView({
   onSelect,
   focusNonce,
   lighting,
+  baseMap,
+  creditContainer,
   simNow,
 }: Props): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -83,11 +152,63 @@ export function GlobeView({
   const visibleRef = useRef(visible);
   const selectedRef = useRef(selectedIndex);
   const satellitesRef = useRef(satellites);
-  const lightingRef = useRef(lighting);
   visibleRef.current = visible;
   selectedRef.current = selectedIndex;
   satellitesRef.current = satellites;
-  lightingRef.current = lighting;
+
+  /** Dernière position connue du curseur dans le canvas (null = curseur sorti). */
+  const cursorRef = useRef<Cartesian2 | undefined>(undefined);
+  const [hover, setHover] = useState<HoverInfo | undefined>();
+
+  /**
+   * Recalcule l'info-bulle depuis la dernière position du curseur.
+   * Appelé au mouvement de souris ET périodiquement : le satellite se déplace
+   * sous un curseur immobile, l'info-bulle doit suivre (et disparaître quand
+   * l'objet s'éloigne).
+   */
+  const refreshHover = useCallback(() => {
+    const viewer = viewerRef.current;
+    const cursor = cursorRef.current;
+    const sats = satellitesRef.current;
+    if (!viewer || !cursor || !sats) {
+      setHover((h) => (h ? undefined : h));
+      return;
+    }
+
+    const picked = viewer.scene.pick(cursor, PICK_TOLERANCE, PICK_TOLERANCE) as
+      | { id?: unknown; primitive?: unknown }
+      | undefined;
+    const index = typeof picked?.id === 'number' ? picked.id : undefined;
+
+    viewer.scene.canvas.style.cursor = index === undefined ? '' : 'pointer';
+
+    if (index === undefined || index >= sats.length) {
+      setHover((h) => (h ? undefined : h));
+      return;
+    }
+
+    const frame = frameRef.current;
+    const points = pointsRef.current;
+    if (!frame || !points) return;
+
+    const position = points.get(index).position;
+    const carto = Cartographic.fromCartesian(position);
+    const o = index * 3;
+    const speedKmS =
+      Math.hypot(frame.velocities[o], frame.velocities[o + 1], frame.velocities[o + 2]) / 1000;
+
+    setHover({
+      index,
+      x: cursor.x,
+      y: cursor.y,
+      latitude: carto ? CesiumMath.toDegrees(carto.latitude) : 0,
+      longitude: carto ? CesiumMath.toDegrees(carto.longitude) : 0,
+      altitudeKm: carto
+        ? carto.height / 1000
+        : Cartesian3.magnitude(position) / 1000 - EARTH_RADIUS_KM,
+      speedKmS,
+    });
+  }, [frameRef]);
 
   /* --------------------------------------------------------------- */
   /* Création du globe (une seule fois)                               */
@@ -96,11 +217,7 @@ export function GlobeView({
     if (!containerRef.current) return;
 
     const viewer = new Viewer(containerRef.current, {
-      // Fond de carte local livré avec Cesium : aucun compte ni jeton requis.
-      baseLayer: ImageryLayer.fromProviderAsync(
-        TileMapServiceImageryProvider.fromUrl(buildModuleUrl('Assets/Textures/NaturalEarthII')),
-        {},
-      ),
+      baseLayer: createImagery(baseMap),
       baseLayerPicker: false,
       geocoder: false,
       homeButton: false,
@@ -112,14 +229,16 @@ export function GlobeView({
       infoBox: false,
       selectionIndicator: false,
       shouldAnimate: false,
+      // Crédits déportés dans la barre d'état (voir le commentaire du prop).
+      ...(creditContainer.current ? { creditContainer: creditContainer.current } : {}),
     });
 
     viewer.scene.globe.enableLighting = lighting;
     if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = true;
     viewer.scene.globe.showGroundAtmosphere = true;
     viewer.scene.fog.enabled = false;
-    // Distances de travail : de l'orbite basse à bien au-delà du géostationnaire.
-    viewer.scene.screenSpaceCameraController.minimumZoomDistance = 500_000;
+    // Distances de travail : de la vue rapprochée jusqu'au-delà du géostationnaire.
+    viewer.scene.screenSpaceCameraController.minimumZoomDistance = 50_000;
     viewer.scene.screenSpaceCameraController.maximumZoomDistance = 200_000_000;
     viewer.camera.setView({
       destination: Cartesian3.fromDegrees(6.14, 46.2, 42_000_000),
@@ -134,12 +253,26 @@ export function GlobeView({
     labelsRef.current = labels;
     polylinesRef.current = polylines;
 
-    // Sélection au clic : l'identifiant du point est son index catalogue.
     const handler = new ScreenSpaceEventHandler(viewer.scene.canvas);
+
+    // Sélection au clic, avec la même tolérance que le survol.
     handler.setInputAction((movement: { position: Cartesian2 }) => {
-      const picked = viewer.scene.pick(movement.position) as { id?: unknown } | undefined;
+      const picked = viewer.scene.pick(movement.position, PICK_TOLERANCE, PICK_TOLERANCE) as
+        | { id?: unknown }
+        | undefined;
       onSelect(typeof picked?.id === 'number' ? picked.id : null);
     }, ScreenSpaceEventType.LEFT_CLICK);
+
+    // Survol : on mémorise la position du curseur, le recalcul est fait ailleurs
+    // (le pick est une lecture GPU, inutile de l'exécuter à chaque pixel parcouru).
+    handler.setInputAction((movement: { endPosition: Cartesian2 }) => {
+      cursorRef.current = movement.endPosition.clone();
+    }, ScreenSpaceEventType.MOUSE_MOVE);
+
+    const onLeave = (): void => {
+      cursorRef.current = undefined;
+    };
+    viewer.scene.canvas.addEventListener('mouseleave', onLeave);
 
     /* Boucle de rendu : positions extrapolées puis écrites dans la collection. */
     const onPreUpdate = (): void => {
@@ -193,6 +326,7 @@ export function GlobeView({
 
     return () => {
       viewer.scene.preUpdate.removeEventListener(onPreUpdate);
+      viewer.scene.canvas.removeEventListener('mouseleave', onLeave);
       handler.destroy();
       viewer.destroy();
       viewerRef.current = undefined;
@@ -203,6 +337,12 @@ export function GlobeView({
     // Volontairement monté une seule fois : les mises à jour passent par les refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /* Rafraîchissement périodique de l'info-bulle (le satellite bouge, pas le curseur). */
+  useEffect(() => {
+    const id = window.setInterval(refreshHover, HOVER_REFRESH_MS);
+    return () => window.clearInterval(id);
+  }, [refreshHover]);
 
   /* --------------------------------------------------------------- */
   /* Peuplement de la collection quand le catalogue change            */
@@ -221,6 +361,7 @@ export function GlobeView({
         position: Cartesian3.ZERO,
         color: Color.fromCssColorString(colorForCategories(satellites[i].categories)),
         pixelSize: POINT_SIZE,
+        scaleByDistance: POINT_SCALE,
         show: false,
       });
     }
@@ -235,7 +376,7 @@ export function GlobeView({
       style: LabelStyle.FILL_AND_OUTLINE,
       horizontalOrigin: HorizontalOrigin.LEFT,
       verticalOrigin: VerticalOrigin.BOTTOM,
-      pixelOffset: new Cartesian2(12, -8),
+      pixelOffset: new Cartesian2(14, -10),
       show: false,
     });
   }, [satellites]);
@@ -331,5 +472,47 @@ export function GlobeView({
     if (viewer) viewer.scene.globe.enableLighting = lighting;
   }, [lighting]);
 
-  return <div ref={containerRef} className="globe-container" />;
+  /* Changement de fond de carte */
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+    viewer.imageryLayers.removeAll();
+    viewer.imageryLayers.add(createImagery(baseMap));
+  }, [baseMap]);
+
+  const hovered = hover !== undefined && satellites ? satellites[hover.index] : undefined;
+
+  return (
+    <div className="globe-wrapper">
+      <div ref={containerRef} className="globe-container" />
+
+      {hover && hovered && (
+        <div
+          className="globe-tooltip"
+          style={{ left: hover.x + 16, top: hover.y + 16 }}
+          role="tooltip"
+        >
+          <div className="globe-tooltip-name">
+            <span
+              className="filter-dot"
+              style={{ background: colorForCategories(hovered.categories) }}
+            />
+            {hovered.name}
+          </div>
+          <div className="globe-tooltip-meta">
+            {hovered.regime} · NORAD {hovered.noradId}
+          </div>
+          <div className="globe-tooltip-meta">
+            {Math.abs(hover.latitude).toFixed(2)}° {hover.latitude >= 0 ? 'N' : 'S'} ·{' '}
+            {Math.abs(hover.longitude).toFixed(2)}° {hover.longitude >= 0 ? 'E' : 'O'}
+          </div>
+          <div className="globe-tooltip-meta">
+            {Math.round(hover.altitudeKm).toLocaleString('fr-FR')} km ·{' '}
+            {hover.speedKmS.toFixed(2)} km/s
+          </div>
+          <div className="globe-tooltip-hint">Clic pour la fiche complète</div>
+        </div>
+      )}
+    </div>
+  );
 }

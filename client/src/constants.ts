@@ -48,11 +48,24 @@ export const TIME_RATES = [
   { value: 3600, label: '× 3 600' },
 ] as const;
 
+/**
+ * Fonds de carte. « Relief » est la texture livrée avec Cesium : basse
+ * résolution (floue en zoom rapproché) mais utilisable hors ligne. Les deux
+ * autres sont des services tuilés publics, sans clé d'API.
+ */
+export const BASE_MAPS = [
+  { value: 'satellite', label: 'Satellite' },
+  { value: 'plan', label: 'Plan' },
+  { value: 'relief', label: 'Relief (hors ligne)' },
+] as const;
+
 /** Clés localStorage (aucune persistance serveur : tout est local au navigateur). */
 export const STORAGE_KEYS = {
   catalog: 'sattracker.catalog.v1',
   filters: 'sattracker.filters.v1',
   favorites: 'sattracker.favorites.v1',
+  lighting: 'sattracker.lighting.v1',
+  baseMap: 'sattracker.basemap.v1',
 } as const;
 
 /** Durée de validité de la copie locale du catalogue (2 h, comme le cache serveur). */
