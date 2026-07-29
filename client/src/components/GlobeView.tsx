@@ -313,12 +313,15 @@ export function GlobeView({
   const [hover, setHover] = useState<HoverInfo | undefined>();
 
   /**
-   * Collection de marqueurs actuellement alimentée. Seule celle-ci porte des
-   * positions à jour : c'est elle qu'il faut interroger pour le survol, la
-   * position de l'étiquette ou le recentrage caméra.
+   * Collection portant les positions à jour pour un objet donné.
+   * Les deux collections coexistent : la masse est rendue en points ou en icônes
+   * selon le réglage, mais l'objet sélectionné est toujours une icône.
    */
-  const activeMarkers = useCallback(
-    () => (useIconsRef.current ? iconsRef.current : pointsRef.current),
+  const markersFor = useCallback(
+    (index: number | null) =>
+      useIconsRef.current || (index !== null && index === selectedRef.current)
+        ? iconsRef.current
+        : pointsRef.current,
     [],
   );
 
@@ -350,7 +353,7 @@ export function GlobeView({
     }
 
     const frame = frameRef.current;
-    const markers = activeMarkers();
+    const markers = markersFor(index);
     if (!frame || !markers || index >= markers.length) return;
 
     const position = markers.get(index).position;
@@ -369,7 +372,7 @@ export function GlobeView({
       speedKmS:
         Math.hypot(frame.velocities[o], frame.velocities[o + 1], frame.velocities[o + 2]) / 1000,
     });
-  }, [frameRef, activeMarkers]);
+  }, [frameRef, markersFor]);
 
   /* --------------------------------------------------------------- */
   /* Création du globe (une seule fois)                               */
@@ -478,31 +481,47 @@ export function GlobeView({
       const { positions, velocities, valid } = frame;
       const count = Math.min(points.length, valid.length);
 
-      // Une seule des deux collections est alimentée et visible à la fois.
-      if (points.show === useIcons) points.show = !useIcons;
-      if (icons.show !== useIcons) icons.show = useIcons;
-
+      /*
+       * Les deux collections restent actives ; c'est le `show` de chaque marqueur
+       * qui tranche. Cela permet de garder l'objet sélectionné en icône même
+       * quand la masse est rendue en points : au-delà du plafond de lisibilité,
+       * l'utilisateur voit tout de même à quoi ressemble le satellite qu'il vient
+       * de cliquer.
+       */
       for (let i = 0; i < count; i++) {
-        const marker = useIcons ? icons.get(i) : points.get(i);
+        const point = points.get(i);
+        const icon = icons.get(i);
         const shown = valid[i] === 1 && (mask.length === 0 || mask[i] === 1);
+        const isSelected = i === selected;
 
-        if (!shown && i !== selected) {
-          if (marker.show) marker.show = false;
+        if (!shown && !isSelected) {
+          if (point.show) point.show = false;
+          if (icon.show) icon.show = false;
           continue;
         }
 
+        const asIcon = useIcons || isSelected;
         const o = i * 3;
-        marker.position = new Cartesian3(
+        const position = new Cartesian3(
           positions[o] + velocities[o] * dt,
           positions[o + 1] + velocities[o + 1] * dt,
           positions[o + 2] + velocities[o + 2] * dt,
         );
-        if (!marker.show) marker.show = true;
+
+        if (asIcon) {
+          icon.position = position;
+          if (!icon.show) icon.show = true;
+          if (point.show) point.show = false;
+        } else {
+          point.position = position;
+          if (!point.show) point.show = true;
+          if (icon.show) icon.show = false;
+        }
       }
 
-      // Seule la collection active porte des positions à jour : c'est elle qui
-      // sert de point d'ancrage à l'étiquette (l'autre reste masquée).
-      const markers = useIcons ? icons : points;
+      // L'objet suivi est toujours rendu en icône : c'est donc cette collection
+      // qui porte sa position à jour, et qui sert d'ancrage à l'étiquette.
+      const markers = icons;
 
       // Étiquette du satellite suivi, accrochée à sa position courante.
       const labelCollection = labelsRef.current;
@@ -821,7 +840,7 @@ export function GlobeView({
   /* --------------------------------------------------------------- */
   useEffect(() => {
     const viewer = viewerRef.current;
-    const markers = activeMarkers();
+    const markers = markersFor(selectedIndex);
     if (!viewer || !markers || focusNonce === 0 || selectedIndex === null) return;
     if (selectedIndex >= markers.length) return;
 
@@ -841,7 +860,7 @@ export function GlobeView({
       orientation: { heading: 0, pitch: -CesiumMath.PI_OVER_TWO, roll: 0 },
       duration: 1.4,
     });
-  }, [focusNonce, selectedIndex]);
+  }, [focusNonce, selectedIndex, markersFor]);
 
   /* Éclairage, atmosphère et Lune */
   useEffect(() => {

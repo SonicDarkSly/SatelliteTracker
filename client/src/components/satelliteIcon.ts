@@ -1,41 +1,113 @@
 /**
- * Icône de satellite utilisée comme marqueur sur le globe.
+ * Marqueur en forme de satellite, dessiné sur un canvas puis exporté en PNG.
  *
- * Dessinée en blanc sur fond transparent : Cesium multiplie la texture par la
- * couleur du marqueur, ce qui permet de la teinter selon la catégorie de l'objet
- * avec une seule image (donc un seul appel de rendu pour toute la collection).
+ * Pourquoi pas un SVG en data-URI, qui serait plus court à écrire : un SVG sans
+ * attributs `width`/`height` explicites n'a pas de dimensions intrinsèques, et
+ * son chargement comme image est alors inégal selon les moteurs de rendu —
+ * WebKit refuse purement et simplement. Un PNG produit par canvas se charge
+ * partout de la même façon.
  *
- * Elle est fournie sous forme de data-URI plutôt que de fichier : pas de requête
- * réseau, pas d'asset à copier au build, et le rendu est disponible dès la
- * première image.
+ * L'image est dessinée en blanc sur fond transparent : Cesium multiplie la
+ * texture par la couleur du marqueur, ce qui permet de teinter chaque objet selon
+ * sa catégorie avec une seule texture — donc un seul appel de rendu pour toute la
+ * collection.
+ *
+ * Le résultat est une chaîne constante : Cesium s'en sert de clé d'atlas, et une
+ * clé unique garantit une seule entrée pour les 16 000 marqueurs. Passer
+ * directement un canvas ferait générer un identifiant aléatoire par marqueur.
  */
 
-const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <g fill="#ffffff">
-    <!-- corps central -->
-    <rect x="27" y="24" width="10" height="16" rx="2"/>
-    <!-- mâts des panneaux -->
-    <rect x="21" y="30.5" width="6" height="3"/>
-    <rect x="37" y="30.5" width="6" height="3"/>
-    <!-- panneaux solaires -->
-    <rect x="6" y="22" width="15" height="20" rx="1.5"/>
-    <rect x="43" y="22" width="15" height="20" rx="1.5"/>
-    <!-- antenne parabolique et son mât -->
-    <rect x="30.5" y="15" width="3" height="9"/>
-    <ellipse cx="32" cy="12" rx="7" ry="4"/>
-  </g>
-  <!-- séparations des cellules photovoltaïques, en négatif -->
-  <g stroke="#000000" stroke-opacity="0.35" stroke-width="1">
-    <line x1="6" y1="32" x2="21" y2="32"/>
-    <line x1="43" y1="32" x2="58" y2="32"/>
-    <line x1="13.5" y1="22" x2="13.5" y2="42"/>
-    <line x1="50.5" y1="22" x2="50.5" y2="42"/>
-  </g>
-</svg>`;
+/** Côté de la texture, en pixels. Puissance de 2, confortable pour l'atlas. */
+const SIZE = 64;
 
 /**
- * Data-URI prêt à être passé à `billboard.image`.
- * Encodage par pourcentage plutôt que base64 : `btoa` refuse tout caractère
- * hors Latin-1, ce qui rendrait l'icône dépendante des accents des commentaires.
+ * Décalage vertical de recentrage.
+ *
+ * Le dessin s'étend de y ≈ 6,5 (haut de l'antenne) à y = 43 (bas des panneaux),
+ * soit un centre à 24,75 alors que le canvas a le sien à 32. Comme le marqueur
+ * est ancré en son centre, laisser le dessin tel quel décalerait visuellement
+ * chaque satellite d'environ 7 pixels vers le haut par rapport à sa position
+ * réelle — un faux décalage, après tout le mal qu'on s'est donné à supprimer les
+ * vrais.
  */
-export const SATELLITE_ICON = `data:image/svg+xml,${encodeURIComponent(SVG)}`;
+const CENTERING_OFFSET_Y = 7.25;
+
+function drawSatellite(ctx: CanvasRenderingContext2D): void {
+  ctx.translate(0, CENTERING_OFFSET_Y);
+  ctx.fillStyle = '#ffffff';
+
+  // Corps central.
+  roundedRect(ctx, 27, 23, 10, 18, 2);
+  ctx.fill();
+
+  // Mâts reliant les panneaux au corps.
+  ctx.fillRect(21, 30.5, 6, 3);
+  ctx.fillRect(37, 30.5, 6, 3);
+
+  // Panneaux solaires.
+  roundedRect(ctx, 5, 21, 16, 22, 1.5);
+  ctx.fill();
+  roundedRect(ctx, 43, 21, 16, 22, 1.5);
+  ctx.fill();
+
+  // Mât et antenne parabolique.
+  ctx.fillRect(30.5, 14, 3, 9);
+  ctx.beginPath();
+  ctx.ellipse(32, 11, 7.5, 4.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Séparation des cellules photovoltaïques : quelques traits sombres qui
+  // rendent les panneaux lisibles même à petite taille.
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(5, 32);
+  ctx.lineTo(21, 32);
+  ctx.moveTo(43, 32);
+  ctx.lineTo(59, 32);
+  ctx.moveTo(13, 21);
+  ctx.lineTo(13, 43);
+  ctx.moveTo(51, 21);
+  ctx.lineTo(51, 43);
+  ctx.stroke();
+}
+
+/** Rectangle à coins arrondis (`roundRect` n'est pas partout disponible). */
+function roundedRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number,
+): void {
+  const r = Math.min(radius, width / 2, height / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + width - r, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+  ctx.lineTo(x + width, y + height - r);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+  ctx.lineTo(x + r, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+function buildIcon(): string {
+  const canvas = document.createElement('canvas');
+  canvas.width = SIZE;
+  canvas.height = SIZE;
+
+  const ctx = canvas.getContext('2d');
+  // Contexte 2D indisponible (cas très marginal) : on retombe sur un marqueur
+  // vide, la collection de points restant de toute façon disponible.
+  if (!ctx) return '';
+
+  drawSatellite(ctx);
+  return canvas.toDataURL('image/png');
+}
+
+/** Image du marqueur, prête à être passée à `billboard.image`. */
+export const SATELLITE_ICON = buildIcon();
