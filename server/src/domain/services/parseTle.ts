@@ -1,12 +1,22 @@
 /**
  * DOMAINE — décodage d'un fichier TLE (format « 3LE » : nom + 2 lignes).
  *
+ * Le format TLE n'est plus la source principale — Celestrak le remplace par l'OMM
+ * depuis que les numéros de catalogue dépassent cinq chiffres — mais il reste
+ * omniprésent : c'est ce qu'on trouve dans les fichiers, les archives et les
+ * autres fournisseurs. Les TLE lus ici sont donc **convertis en OMM** dès
+ * l'ingestion, de sorte que le reste du système ne connaisse qu'un seul format.
+ *
  * Rappel du format (colonnes fixes, indices 0-based) :
  *   Ligne 1 : [02..07] n° NORAD · [09..17] désignation internationale
- *             [18..32] époque AAJJJ.JJJJJJJJ
- *   Ligne 2 : [08..16] inclinaison · [26..33] excentricité (point décimal implicite)
+ *             [18..32] époque AAJJJ.JJJJJJJJ · [33..43] dn/dt
+ *             [44..52] d²n/dt² · [53..61] B* · [64..68] n° du jeu d'éléments
+ *   Ligne 2 : [08..16] inclinaison · [17..25] ascension droite du nœud
+ *             [26..33] excentricité (point décimal implicite)
+ *             [34..42] argument du périgée · [43..51] anomalie moyenne
  *             [52..63] moyen mouvement (rév/jour) · [63..68] n° de révolution
  */
+import type { OmmRecord } from '../model/omm.js';
 import type { SatelliteRecord } from '../model/types.js';
 import { classifySatellite } from './classifySatellite.js';
 import { orbitGeometry } from './orbitGeometry.js';
@@ -42,7 +52,26 @@ export function parseEpoch(line1: string): Date {
   return new Date(startOfYear + (dayOfYear - 1) * 86_400_000);
 }
 
-/** Désignation internationale COSPAR → forme lisible (ex. « 98067A » → « 1998-067A »). */
+/**
+ * Champ TLE à point décimal et exposant implicites, par ex. « 30074-3 » qui
+ * signifie 0,30074 × 10⁻³. Économie de caractères héritée des cartes perforées,
+ * et l'une des raisons pour lesquelles l'OMM lui succède.
+ */
+function parseImpliedExponent(field: string): number {
+  const raw = field.trim();
+  if (!raw || /^[+-]?0+$/.test(raw)) return 0;
+
+  const match = /^([+-]?)(\d+)([+-]\d)$/.exec(raw);
+  if (!match) {
+    const plain = Number(raw);
+    return Number.isFinite(plain) ? plain : 0;
+  }
+  const [, sign, digits, exponent] = match;
+  const value = Number(`0.${digits}`) * Math.pow(10, Number(exponent));
+  return sign === '-' ? -value : value;
+}
+
+/** Désignation internationale COSPAR → forme lisible (« 98067A » → « 1998-067A »). */
 function formatIntlDesignator(raw: string): string {
   const trimmed = raw.trim();
   if (trimmed.length < 5) return trimmed;
@@ -56,10 +85,39 @@ function isTleLine(line: string, index: 1 | 2): boolean {
   return line.length >= 69 && line.startsWith(`${index} `);
 }
 
+/** Construit l'OMM équivalent à un couple de lignes TLE. */
+function toOmm(name: string, l1: string, l2: string): OmmRecord | undefined {
+  const noradId = Number(l1.slice(2, 7).trim());
+  const meanMotion = Number(l2.slice(52, 63));
+  if (!Number.isFinite(noradId) || !Number.isFinite(meanMotion) || meanMotion <= 0) {
+    return undefined;
+  }
+
+  return {
+    OBJECT_NAME: name,
+    OBJECT_ID: formatIntlDesignator(l1.slice(9, 17)),
+    EPOCH: parseEpoch(l1).toISOString(),
+    MEAN_MOTION: meanMotion,
+    ECCENTRICITY: Number(`0.${l2.slice(26, 33).trim()}`),
+    INCLINATION: Number(l2.slice(8, 16)),
+    RA_OF_ASC_NODE: Number(l2.slice(17, 25)),
+    ARG_OF_PERICENTER: Number(l2.slice(34, 42)),
+    MEAN_ANOMALY: Number(l2.slice(43, 51)),
+    EPHEMERIS_TYPE: 0,
+    CLASSIFICATION_TYPE: l1[7] ?? 'U',
+    NORAD_CAT_ID: noradId,
+    ELEMENT_SET_NO: Number(l1.slice(64, 68).trim()) || 999,
+    REV_AT_EPOCH: Number(l2.slice(63, 68).trim()) || 0,
+    BSTAR: parseImpliedExponent(l1.slice(53, 61)),
+    MEAN_MOTION_DOT: Number(l1.slice(33, 43)) || 0,
+    MEAN_MOTION_DDOT: parseImpliedExponent(l1.slice(44, 52)),
+  };
+}
+
 /**
  * Convertit un flux TLE en enregistrements de domaine.
- * Les entrées mal formées sont ignorées silencieusement (le catalogue public
- * contient régulièrement des lignes tronquées) et comptées dans `skipped`.
+ * Les entrées mal formées sont ignorées silencieusement (les fichiers publics
+ * contiennent régulièrement des lignes tronquées) et comptées dans `skipped`.
  */
 export function parseTleCatalog(text: string): { satellites: SatelliteRecord[]; skipped: number } {
   const lines = text
@@ -80,11 +138,7 @@ export function parseTleCatalog(text: string): { satellites: SatelliteRecord[]; 
       l1 = lines[i];
       l2 = lines[i + 1];
       i += 1;
-    } else if (
-      i + 2 < lines.length &&
-      isTleLine(lines[i + 1], 1) &&
-      isTleLine(lines[i + 2], 2)
-    ) {
+    } else if (i + 2 < lines.length && isTleLine(lines[i + 1], 1) && isTleLine(lines[i + 2], 2)) {
       name = lines[i].replace(/^0 /, '').trim();
       l1 = lines[i + 1];
       l2 = lines[i + 2];
@@ -99,29 +153,27 @@ export function parseTleCatalog(text: string): { satellites: SatelliteRecord[]; 
       continue;
     }
 
-    const noradId = l1.slice(2, 7).trim();
-    const meanMotion = Number(l2.slice(52, 63));
-    const inclinationDeg = Number(l2.slice(8, 16));
-    const eccentricity = Number(`0.${l2.slice(26, 33).trim()}`);
-
-    if (!noradId || !Number.isFinite(meanMotion) || meanMotion <= 0) {
+    const displayName = name || `NORAD ${l1.slice(2, 7).trim()}`;
+    const omm = toOmm(displayName, l1, l2);
+    if (!omm) {
       skipped++;
       continue;
     }
 
-    const displayName = name || `NORAD ${noradId}`;
-    const { periodMinutes, altitudeKm, regime } = orbitGeometry(meanMotion, eccentricity);
+    const { periodMinutes, altitudeKm, regime } = orbitGeometry(
+      omm.MEAN_MOTION,
+      omm.ECCENTRICITY,
+    );
 
     satellites.push({
-      noradId,
+      noradId: String(omm.NORAD_CAT_ID).padStart(5, '0'),
       name: displayName,
-      intlDesignator: formatIntlDesignator(l1.slice(9, 17)),
-      line1: l1,
-      line2: l2,
-      epoch: parseEpoch(l1).toISOString(),
-      meanMotion,
-      inclinationDeg: Number.isFinite(inclinationDeg) ? inclinationDeg : 0,
-      eccentricity: Number.isFinite(eccentricity) ? eccentricity : 0,
+      intlDesignator: omm.OBJECT_ID,
+      omm,
+      epoch: omm.EPOCH,
+      meanMotion: omm.MEAN_MOTION,
+      inclinationDeg: Number.isFinite(omm.INCLINATION) ? omm.INCLINATION : 0,
+      eccentricity: Number.isFinite(omm.ECCENTRICITY) ? omm.ECCENTRICITY : 0,
       periodMinutes,
       altitudeKm,
       regime,

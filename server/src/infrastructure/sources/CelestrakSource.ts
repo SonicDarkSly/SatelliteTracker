@@ -5,7 +5,7 @@
  */
 import { Logger } from '@nestjs/common';
 import type { TleFetchResult, TleSourcePort } from '../../domain/ports/TleSourcePort.js';
-import { parseTleCatalog } from '../../domain/services/parseTle.js';
+import { parseOmmCatalog } from '../../domain/services/parseOmmCatalog.js';
 import { DEFAULT_HEADERS, fetchWithRetry } from '../http/fetch.js';
 import { celestrakGroupUrl, celestrakTimeoutMs, maxEpochAgeDays } from '../config/celestrak.js';
 
@@ -99,14 +99,14 @@ export class CelestrakSource implements TleSourcePort {
       }
 
       const text = await response.text();
-      // Celestrak répond 200 avec un message texte quand un groupe est inconnu
-      // ou quand le débit est dépassé : on le détecte sur l'absence de TLE.
-      if (!/^1 \d{5}/m.test(text)) {
+      // Celestrak répond 200 avec un message en clair quand un groupe est inconnu
+      // ou que le débit est dépassé : on le détecte sur l'absence de tableau JSON.
+      if (!text.trimStart().startsWith('[')) {
         const hint = text.trim().slice(0, 160) || 'réponse vide';
-        return this.failure(`aucun TLE dans la réponse — ${hint}`);
+        return this.failure(`réponse inattendue (JSON attendu) — ${hint}`);
       }
 
-      const { satellites, skipped } = parseTleCatalog(text);
+      const { satellites, skipped } = parseOmmCatalog(text);
       const fresh = this.dropStaleEpochs(satellites);
 
       // Accès rétabli : on repart de l'attente initiale pour le prochain incident.
@@ -116,7 +116,7 @@ export class CelestrakSource implements TleSourcePort {
         `${this.id} : ${fresh.length} objets` +
           (skipped > 0 ? ` · ${skipped} entrées ignorées (format)` : '') +
           (satellites.length - fresh.length > 0
-            ? ` · ${satellites.length - fresh.length} TLE périmés écartés`
+            ? ` · ${satellites.length - fresh.length} jeux d'éléments périmés écartés`
             : ''),
       );
 
@@ -135,7 +135,7 @@ export class CelestrakSource implements TleSourcePort {
     }
   }
 
-  /** Écarte les TLE trop anciens : la propagation SGP4 y dérive de plusieurs km. */
+  /** Écarte les éléments trop anciens : la propagation SGP4 y dérive de plusieurs km. */
   private dropStaleEpochs(satellites: TleFetchResult['satellites']): TleFetchResult['satellites'] {
     const limit = Date.now() - maxEpochAgeDays() * 86_400_000;
     return satellites.filter((s) => Date.parse(s.epoch) >= limit);

@@ -6,8 +6,9 @@ satellites de navigation, météo, observation de la Terre, télécommunications
 lanceur et débris.
 
 Les positions ne sont pas approximées : elles sont calculées avec le modèle **SGP4**,
-le propagateur orbital standard, à partir des **éléments orbitaux publics (TLE)** du
-catalogue NORAD publié par Celestrak.
+le propagateur orbital standard, à partir des **éléments orbitaux publics** du catalogue
+NORAD publié par Celestrak, au format **OMM** (Orbit Mean-Elements Message, standard
+CCSDS).
 
 ## Ce que l'application affiche
 
@@ -25,12 +26,12 @@ catalogue NORAD publié par Celestrak.
 
 | Élément | Ordre de grandeur |
 |---|---|
-| SGP4 avec un TLE frais (< 1 jour) | erreur de position ~1 km |
-| SGP4 avec un TLE de 7 jours | erreur de quelques km à quelques dizaines de km |
-| TLE de plus de 30 jours | écartés automatiquement (`MAX_EPOCH_AGE_DAYS`) |
+| SGP4 avec des éléments frais (< 1 jour) | erreur de position ~1 km |
+| SGP4 avec des éléments de 7 jours | erreur de quelques km à quelques dizaines de km |
+| Éléments de plus de 30 jours | écartés automatiquement (`MAX_EPOCH_AGE_DAYS`) |
 | Interpolation entre deux trames du worker (500 ms) | erreur < 2 m |
 
-Les TLE sont rafraîchis toutes les 2 heures côté serveur, ce qui correspond au rythme
+Les éléments sont rafraîchis toutes les 2 heures côté serveur, ce qui correspond au rythme
 réel de publication du catalogue. L'application n'est pas un outil de conjonction ni de
 poursuite d'antenne : c'est un outil de visualisation.
 
@@ -109,8 +110,8 @@ SatelliteTracker/
 | Route | Description |
 |---|---|
 | `GET /api/health` | sonde de démarrage (utilisée par le lanceur) |
-| `GET /api/satellites` | catalogue complet avec les TLE (≈ 3 Mo, gzip ≈ 600 Ko) |
-| `GET /api/satellites/facets` | facettes de filtrage et fraîcheur, sans les TLE |
+| `GET /api/satellites` | catalogue complet avec les éléments OMM (gzip ≈ 1 Mo) |
+| `GET /api/satellites/facets` | facettes de filtrage et fraîcheur, sans les éléments |
 | `GET /api/satellites/:noradId` | fiche d'un objet |
 | `POST /api/satellites/refresh` | force le rechargement depuis Celestrak |
 
@@ -122,17 +123,29 @@ la politique d'usage du site : **un seul jeu de requêtes toutes les 2 heures**,
 soit le nombre d'onglets ouverts (cache serveur + cache navigateur, une seule
 récupération concurrente).
 
-Groupes récupérés par défaut : `active` (tout le catalogue actif), `stations`, `visual`,
-`last-30-days`. Les catégories (Starlink, navigation, météo…) sont déduites de la
-désignation du catalogue et du régime orbital calculé.
+Groupes récupérés par défaut : `active` (tout le catalogue actif) et `stations`. Les
+catégories (Starlink, navigation, météo…) sont déduites de la désignation du catalogue et
+du régime orbital calculé.
+
+### Pourquoi OMM et non TLE
+
+Le format TLE ne réserve que cinq caractères au numéro de catalogue, dont le plafond réel
+est **69999**. Celestrak a atteint cette limite en juillet 2026 : les objets catalogués
+depuis portent des numéros à six chiffres et **n'apparaissent plus dans le flux TLE**. Le
+projet consomme donc l'OMM, qui n'a pas cette limite, corrige aussi le codage de l'année
+sur deux chiffres, et fournit des champs nommés plutôt que des colonnes fixes. Les fichiers
+TLE déposés localement restent acceptés : ils sont convertis en OMM à la lecture.
 
 ## Configuration (`server/.env`, optionnel)
 
 ```ini
 PORT=3001                    # port de l'API
-CELESTRAK_GROUPS=active,stations,visual,last-30-days
+CELESTRAK_GROUPS=active,stations
 CATALOG_TTL_MINUTES=120      # durée de vie du cache serveur
-MAX_EPOCH_AGE_DAYS=30        # au-delà, les TLE sont écartés
+CELESTRAK_TIMEOUT_MS=60000   # délai d'attente d'un groupe (plusieurs Mo)
+SATCAT_TTL_HOURS=24          # durée de vie du registre en cache
+MAX_EPOCH_AGE_DAYS=30        # au-delà, les éléments sont écartés
+TLE_DIR=                     # dossier de fichiers .tle / .json locaux
 ```
 
 Aucune clé d'API n'est nécessaire, y compris pour Cesium : le fond de carte utilisé est

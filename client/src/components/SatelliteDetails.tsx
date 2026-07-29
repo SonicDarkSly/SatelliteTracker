@@ -179,15 +179,9 @@ export function SatelliteDetails({
 
       <details className="tle-block">
         <summary>
-          <Text type="secondary">Éléments orbitaux bruts (TLE)</Text>
+          <Text type="secondary">Éléments orbitaux bruts (OMM)</Text>
         </summary>
-        <pre>
-          {satellite.name}
-          {'\n'}
-          {satellite.line1}
-          {'\n'}
-          {satellite.line2}
-        </pre>
+        <pre>{JSON.stringify(satellite.omm, null, 2)}</pre>
       </details>
     </div>
   );

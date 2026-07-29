@@ -7,18 +7,22 @@
  * `server/data/tle/` : ils sont lus au démarrage, fusionnés avec les autres
  * sources, et c'est toujours le TLE d'époque la plus récente qui gagne.
  *
- * Format attendu : le TLE à trois lignes habituel (nom, ligne 1, ligne 2), tel
- * qu'exporté par Celestrak, Space-Track ou tout autre fournisseur.
+ * Deux formats acceptés, reconnus à l'extension : le TLE à trois lignes habituel
+ * (`.tle`, `.txt`, `.3le`) et l'OMM en JSON (`.json`), que Celestrak recommande
+ * désormais. Les TLE sont convertis en OMM à la lecture, comme partout ailleurs.
  */
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { Logger } from '@nestjs/common';
 import type { TleFetchResult, TleSourcePort } from '../../domain/ports/TleSourcePort.js';
+import { parseOmmCatalog } from '../../domain/services/parseOmmCatalog.js';
 import { parseTleCatalog } from '../../domain/services/parseTle.js';
 import { dataDir } from '../config/paths.js';
 
 /** Extensions reconnues comme fichiers d'éléments orbitaux. */
 const TLE_EXTENSIONS = ['.tle', '.txt', '.3le'];
+const OMM_EXTENSIONS = ['.json'];
+const ALL_EXTENSIONS = [...TLE_EXTENSIONS, ...OMM_EXTENSIONS];
 
 export function tleDir(): string {
   return process.env.TLE_DIR ?? join(dataDir(), 'tle');
@@ -30,7 +34,7 @@ export function localTleFiles(): string[] {
   if (!existsSync(dir)) return [];
   try {
     return readdirSync(dir)
-      .filter((f) => TLE_EXTENSIONS.some((ext) => f.toLowerCase().endsWith(ext)))
+      .filter((f) => ALL_EXTENSIONS.some((ext) => f.toLowerCase().endsWith(ext)))
       .map((f) => join(dir, f));
   } catch {
     return [];
@@ -54,10 +58,20 @@ export class FileTleSource implements TleSourcePort {
       });
     }
 
-    const texts: string[] = [];
+    // Pas de filtrage sur l'âge des éléments ici : si l'utilisateur fournit un
+    // fichier, c'est qu'il veut s'en servir. L'ancienneté est signalée dans la fiche.
+    const satellites: TleFetchResult['satellites'] = [];
+    let skipped = 0;
+
     for (const file of files) {
       try {
-        texts.push(readFileSync(file, 'utf8'));
+        const text = readFileSync(file, 'utf8');
+        const isOmm =
+          OMM_EXTENSIONS.some((ext) => file.toLowerCase().endsWith(ext)) ||
+          text.trimStart().startsWith('[');
+        const result = isOmm ? parseOmmCatalog(text) : parseTleCatalog(text);
+        satellites.push(...result.satellites);
+        skipped += result.skipped;
       } catch (err) {
         this.logger.warn(
           `${file} illisible : ${err instanceof Error ? err.message : String(err)}`,
@@ -65,9 +79,6 @@ export class FileTleSource implements TleSourcePort {
       }
     }
 
-    // Pas de filtrage sur l'âge des TLE ici : si l'utilisateur fournit un fichier,
-    // c'est qu'il veut s'en servir. L'ancienneté est signalée dans la fiche.
-    const { satellites, skipped } = parseTleCatalog(texts.join('\n'));
     this.logger.log(
       `${files.length} fichier(s) local(aux) : ${satellites.length} objets` +
         (skipped > 0 ? ` · ${skipped} entrées ignorées (format)` : ''),

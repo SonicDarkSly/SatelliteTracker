@@ -56,9 +56,16 @@ export function celestrakBaseUrl(): string {
   return process.env.CELESTRAK_BASE_URL ?? 'https://celestrak.org/NORAD/elements/gp.php';
 }
 
-/** URL d'un groupe au format TLE 3 lignes. */
+/**
+ * URL d'un groupe au format OMM/JSON.
+ *
+ * Et non plus `FORMAT=tle` : le format TLE ne réserve que cinq caractères au
+ * numéro de catalogue, dont le plafond réel est 69999. Depuis juillet 2026, les
+ * objets nouvellement catalogués reçoivent des numéros à six chiffres et sont
+ * absents du flux TLE. L'OMM n'a pas cette limite.
+ */
 export function celestrakGroupUrl(groupId: string): string {
-  return `${celestrakBaseUrl()}?GROUP=${encodeURIComponent(groupId)}&FORMAT=tle`;
+  return `${celestrakBaseUrl()}?GROUP=${encodeURIComponent(groupId)}&FORMAT=json`;
 }
 
 /** Groupes configurés (CELESTRAK_GROUPS) ou valeurs par défaut. */

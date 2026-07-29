@@ -12,7 +12,7 @@
  * inférieure au mètre sur 500 ms).
  */
 import * as satellite from 'satellite.js';
-import type { WorkerRequest, WorkerResponse } from '../types';
+import type { OmmRecord, WorkerRequest, WorkerResponse } from '../types';
 
 /** Cadence d'envoi des trames au thread principal (ms). */
 const FRAME_INTERVAL_MS = 500;
@@ -61,16 +61,24 @@ function simNowMs(): number {
   return anchorSimMs + (Date.now() - anchorWallMs) * rate;
 }
 
-/** Construit les enregistrements SGP4. Un TLE dégénéré donne satrec.error ≠ 0. */
-function init(tles: { line1: string; line2: string }[]): void {
-  satrecs = new Array(tles.length);
-  valid = new Uint8Array(tles.length);
-  positions = new Float32Array(tles.length * 3);
-  velocities = new Float32Array(tles.length * 3);
+/**
+ * Construit les enregistrements SGP4 depuis les éléments OMM.
+ *
+ * `json2satrec` remplace `twoline2satrec` : le format TLE ne réserve que cinq
+ * caractères au numéro de catalogue et n'accueille donc plus les objets
+ * catalogués depuis juillet 2026. Un jeu d'éléments dégénéré donne
+ * `satrec.error ≠ 0` et l'objet est simplement marqué non propageable.
+ */
+function init(elements: OmmRecord[]): void {
+  satrecs = new Array(elements.length);
+  valid = new Uint8Array(elements.length);
+  positions = new Float32Array(elements.length * 3);
+  velocities = new Float32Array(elements.length * 3);
 
-  for (let i = 0; i < tles.length; i++) {
+  for (let i = 0; i < elements.length; i++) {
     try {
-      const rec = satellite.twoline2satrec(tles[i].line1, tles[i].line2) as SatRec;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const rec = satellite.json2satrec(elements[i] as any) as SatRec;
       satrecs[i] = rec;
       valid[i] = rec && rec.error === 0 ? 1 : 0;
     } catch {
@@ -79,7 +87,7 @@ function init(tles: { line1: string; line2: string }[]): void {
     }
   }
 
-  post({ type: 'ready', count: tles.length, valid: valid.slice() });
+  post({ type: 'ready', count: elements.length, valid: valid.slice() });
   start();
 }
 
@@ -248,7 +256,7 @@ self.addEventListener('message', (event: MessageEvent) => {
   switch (request.type) {
     case 'init':
       stop();
-      init(request.tles);
+      init(request.elements);
       break;
     case 'clock':
       anchorWallMs = Date.now();

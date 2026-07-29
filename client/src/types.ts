@@ -2,12 +2,40 @@
 
 export type OrbitRegime = 'LEO' | 'MEO' | 'GEO' | 'HEO';
 
+/**
+ * Éléments orbitaux moyens au format OMM (standard CCSDS), tels que publiés par
+ * Celestrak et consommés directement par `json2satrec` de satellite.js.
+ *
+ * Remplace le TLE, dont les cinq caractères de numéro de catalogue ne suffisent
+ * plus depuis juillet 2026 : les nouveaux objets, numérotés au-delà de 69999,
+ * sont absents du flux TLE.
+ */
+export interface OmmRecord {
+  OBJECT_NAME: string;
+  OBJECT_ID: string;
+  EPOCH: string;
+  MEAN_MOTION: number;
+  ECCENTRICITY: number;
+  INCLINATION: number;
+  RA_OF_ASC_NODE: number;
+  ARG_OF_PERICENTER: number;
+  MEAN_ANOMALY: number;
+  EPHEMERIS_TYPE: number;
+  CLASSIFICATION_TYPE: string;
+  NORAD_CAT_ID: number;
+  ELEMENT_SET_NO: number;
+  REV_AT_EPOCH: number;
+  BSTAR: number;
+  MEAN_MOTION_DOT: number;
+  MEAN_MOTION_DDOT: number;
+}
+
 export interface SatelliteRecord {
   noradId: string;
   name: string;
   intlDesignator: string;
-  line1: string;
-  line2: string;
+  /** Éléments orbitaux, passés tels quels au propagateur SGP4. */
+  omm: OmmRecord;
   epoch: string;
   meanMotion: number;
   inclinationDeg: number;
@@ -111,7 +139,7 @@ export interface SatelliteState {
 /* ------------------------------------------------------------------ */
 
 export type WorkerRequest =
-  | { type: 'init'; tles: { line1: string; line2: string }[] }
+  | { type: 'init'; elements: OmmRecord[] }
   | { type: 'clock'; simEpochMs: number; rate: number }
   | { type: 'orbit'; index: number }
   /** Orbite de l'objet survolé, distincte de celle de l'objet suivi. */

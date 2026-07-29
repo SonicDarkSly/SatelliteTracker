@@ -1,5 +1,6 @@
 /** DOMAINE — modèle métier du suivi de satellites. */
 import type { SatelliteFamily } from './families.js';
+import type { OmmRecord } from './omm.js';
 
 /** Identifiant catalogue NORAD (5 chiffres, conservé en texte pour l'affichage). */
 export type NoradId = string;
@@ -25,17 +26,17 @@ export type CategoryId =
   | 'other';
 
 /**
- * ENTITÉ — un objet en orbite avec ses éléments orbitaux (TLE à 2 lignes).
- * Le TLE est transmis tel quel au client, qui fait la propagation SGP4.
+ * ENTITÉ — un objet en orbite avec ses éléments orbitaux moyens (OMM).
+ * Le bloc OMM est transmis tel quel au client, qui fait la propagation SGP4.
  */
 export interface SatelliteRecord {
   readonly noradId: NoradId;
   readonly name: string;
-  /** Désignation internationale COSPAR (ex. « 98-067A »). */
+  /** Désignation internationale COSPAR (ex. « 1998-067A »). */
   readonly intlDesignator: string;
-  readonly line1: string;
-  readonly line2: string;
-  /** Époque du TLE (ISO 8601) — plus elle est récente, plus la position est juste. */
+  /** Éléments orbitaux au format OMM, consommés directement par SGP4. */
+  readonly omm: OmmRecord;
+  /** Époque des éléments (ISO 8601) — plus elle est récente, plus la position est juste. */
   readonly epoch: string;
   /** Révolutions par jour. */
   readonly meanMotion: number;

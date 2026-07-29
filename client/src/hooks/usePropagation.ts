@@ -151,7 +151,7 @@ export function usePropagation(satellites: SatelliteRecord[] | undefined): Propa
     setReady(false);
     workerRef.current.postMessage({
       type: 'init',
-      tles: satellites.map((s) => ({ line1: s.line1, line2: s.line2 })),
+      elements: satellites.map((s) => s.omm),
     });
   }, [satellites]);
 

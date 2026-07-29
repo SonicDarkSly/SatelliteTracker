@@ -5,6 +5,26 @@ terrestre, à partir des éléments orbitaux publics (TLE Celestrak) propagés p
 Même esprit que le projet SwissJobsSearch : monorepo npm workspaces, NestJS hexagonal +
 CQRS côté serveur, React + Vite + Ant Design côté client, lanceurs double-clic.
 
+## Format des données : OMM, pas TLE
+
+Le projet consomme les éléments orbitaux au format **OMM** (Orbit Mean-Elements Message,
+standard CCSDS), via `FORMAT=json` chez Celestrak. **Ne pas revenir au TLE.**
+
+Raison : le TLE, hérité des cartes perforées, ne réserve que **cinq caractères** au numéro
+de catalogue, dont le plafond réel est **69999** (et non 99999). Celestrak a annoncé le
+dépassement pour le 20 juillet 2026 ; les objets catalogués depuis reçoivent des numéros à
+six chiffres et **sont absents du flux TLE**. L'OMM lève aussi la limite d'année sur deux
+chiffres et supprime le découpage par colonnes et les sommes de contrôle.
+
+- Client : `satellite.js` **7.x** et `json2satrec` (et non `twoline2satrec`, ni la 5.x qui
+  ignore l'OMM). `propagate` renvoie `{ position, velocity, meanElements }`.
+- `SatelliteRecord.omm` porte le bloc d'éléments, transmis tel quel au worker.
+- `parseTle.ts` est conservé pour les fichiers locaux et **convertit le TLE en OMM** à
+  l'ingestion : un seul format circule dans le système. Vérifié : conversion et OMM natif
+  donnent la même position à **0,0 m**.
+- Le registre reste `satcat.csv` (et non `satcat.txt`, dont le format à colonnes fixes a la
+  même limitation que le TLE).
+
 ## Principes directeurs (important — l'utilisateur y tient)
 
 - **100 % local** : aucun compte, aucune clé d'API, aucun service payant. Le seul appel
