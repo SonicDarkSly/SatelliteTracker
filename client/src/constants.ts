@@ -65,7 +65,10 @@ export const STORAGE_KEYS = {
   catalog: 'sattracker.catalog.v1',
   filters: 'sattracker.filters.v1',
   favorites: 'sattracker.favorites.v1',
-  settings: 'sattracker.settings.v1',
+  // v2 : les réglages de taille ont changé de signification (valeurs
+  // indépendantes, exprimées en pixels en vue globe). Conserver les anciennes
+  // aurait donné des marqueurs démesurés.
+  settings: 'sattracker.settings.v2',
 } as const;
 
 /**
@@ -73,14 +76,6 @@ export const STORAGE_KEYS = {
  * de quelques centaines, le globe devient illisible bien avant d'être lent.
  */
 export const ORBIT_BATCH_MAX = 200;
-
-/**
- * Nombre d'objets au-delà duquel les marqueurs repassent en simples points.
- * Une icône de satellite occupe une vingtaine de pixels : à plusieurs milliers
- * d'objets simultanés, elles se chevauchent et l'écran devient illisible bien
- * avant d'être lent. Le basculement est automatique et signalé dans les réglages.
- */
-export const ICON_MAX_COUNT = 2500;
 
 /**
  * Seuil en dessous duquel on considère le catalogue dégradé et on alerte

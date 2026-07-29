@@ -24,7 +24,6 @@ import { useSatelliteFilters } from './hooks/useSatelliteFilters';
 import { useSettings } from './hooks/useSettings';
 import {
   DEFAULT_HIDDEN_CATEGORIES,
-  ICON_MAX_COUNT,
   MIN_USABLE_CATALOG,
   ORBIT_BATCH_MAX,
   STORAGE_KEYS,
@@ -122,11 +121,8 @@ export default function App(): JSX.Element {
     if (settings.showOrbits && visibleCount > ORBIT_BATCH_MAX) {
       out.push({ label: 'orbites', limit: ORBIT_BATCH_MAX });
     }
-    if (settings.satelliteIcons && visibleCount > ICON_MAX_COUNT) {
-      out.push({ label: 'icônes', limit: ICON_MAX_COUNT });
-    }
     return out;
-  }, [settings.showOrbits, settings.satelliteIcons, visibleCount]);
+  }, [settings.showOrbits, visibleCount]);
 
   /** Nombre de filtres qui s'écartent des valeurs par défaut. */
   const activeFilterCount = useMemo(() => {
@@ -180,7 +176,6 @@ export default function App(): JSX.Element {
             onSelect={setSelectedIndex}
             focusNonce={focusNonce}
             settings={settings}
-            visibleCount={visibleCount}
             timeRate={propagation.rate}
             creditContainer={creditRef}
             simNow={propagation.simNow}

@@ -45,7 +45,6 @@ import 'cesium/Build/Cesium/Widgets/widgets.css';
 import type { OrbitBatch, PropagationFrame } from '../hooks/usePropagation';
 import type { DisplaySettings } from '../hooks/useSettings';
 import type { SatelliteRecord } from '../types';
-import { ICON_MAX_COUNT } from '../constants';
 import { colorForCategories } from '../utils/format';
 import { SATELLITE_ICON } from './satelliteIcon';
 
@@ -67,8 +66,6 @@ interface Props {
   /** Incrémenté pour demander un recentrage caméra sur la sélection. */
   focusNonce: number;
   settings: DisplaySettings;
-  /** Nombre d'objets affichés, qui conditionne le style de marqueur. */
-  visibleCount: number;
   /**
    * Facteur d'accélération du temps. Indispensable à l'extrapolation entre deux
    * trames : celle-ci avance de `Δt réel × facteur` en temps simulé.
@@ -92,16 +89,21 @@ const PICK_TOLERANCE = 16;
 const HOVER_REFRESH_MS = 150;
 
 /**
- * Rapport entre la taille de base réglée et la taille de l'icône : une icône
- * doit être sensiblement plus grande qu'un point pour rester lisible, son dessin
- * n'occupant qu'une partie de son cadre.
+ * Distances de référence du grossissement (mètres) et facteur au loin.
+ *
+ * Le choix de la borne lointaine est déterminant, et le premier était mauvais :
+ * avec 60 000 km, l'interpolation linéaire en distance donnait encore un facteur
+ * ~4 à 1 500 km d'altitude de caméra, c'est-à-dire à un zoom courant. Tous les
+ * marqueurs apparaissaient donc énormes.
+ *
+ * Avec une borne à 20 000 km et un facteur lointain fixé à 1, la règle devient
+ * lisible : en vue globe, un marqueur fait exactement la taille réglée ; le
+ * réglage de grossissement n'agit qu'en approche. C'est ce que demande
+ * l'utilisateur : le curseur de zoom ne doit pas toucher aux objets éloignés.
  */
-const ICON_SIZE_FACTOR = 4.5;
-
-/** Distances de référence de la mise à l'échelle des points (mètres). */
 const SCALE_NEAR_M = 3.0e5;
-const SCALE_FAR_M = 6.0e7;
-const SCALE_FAR_FACTOR = 0.8;
+const SCALE_FAR_M = 2.0e7;
+const SCALE_FAR_FACTOR = 1;
 
 /** Rayon terrestre moyen (km), repli pour l'altitude affichée au survol. */
 const EARTH_RADIUS_KM = 6371;
@@ -268,7 +270,6 @@ export function GlobeView({
   onSelect,
   focusNonce,
   settings,
-  visibleCount,
   timeRate,
   creditContainer,
   simNow,
@@ -297,7 +298,12 @@ export function GlobeView({
   const moonRef = useRef(settings.moon);
   const moonOrbitRef = useRef(settings.moonOrbit);
   const timeRateRef = useRef(timeRate);
-  /** Icônes ou points : décidé ici pour être lisible dans la boucle de rendu. */
+  /**
+   * Icônes ou points. Plus de bascule automatique selon le nombre d'objets :
+   * la lisibilité est désormais assurée par la taille en pixels et le
+   * grossissement par distance, pas par un seuil qui faisait disparaître les
+   * icônes sans explication.
+   */
   const useIconsRef = useRef(false);
   visibleRef.current = visible;
   selectedRef.current = selectedIndex;
@@ -306,7 +312,7 @@ export function GlobeView({
   moonRef.current = settings.moon;
   moonOrbitRef.current = settings.moonOrbit;
   timeRateRef.current = timeRate;
-  useIconsRef.current = settings.satelliteIcons && visibleCount <= ICON_MAX_COUNT;
+  useIconsRef.current = settings.satelliteIcons;
 
   /** Dernière position connue du curseur dans le canvas (undefined = curseur sorti). */
   const cursorRef = useRef<Cartesian2 | undefined>(undefined);
@@ -666,8 +672,8 @@ export function GlobeView({
         position: Cartesian3.ZERO,
         image: SATELLITE_ICON,
         color,
-        width: settings.pointSize * ICON_SIZE_FACTOR,
-        height: settings.pointSize * ICON_SIZE_FACTOR,
+        width: settings.iconSize,
+        height: settings.iconSize,
         scaleByDistance: scale,
         show: false,
       });
@@ -724,7 +730,7 @@ export function GlobeView({
       point.scaleByDistance = scale;
 
       const icon = icons.get(i);
-      const size = settings.pointSize * ICON_SIZE_FACTOR * factor;
+      const size = settings.iconSize * factor;
       icon.width = size;
       icon.height = size;
       icon.scaleByDistance = scale;

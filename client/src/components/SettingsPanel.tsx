@@ -1,6 +1,6 @@
 /** Panneau de réglages d'affichage (drawer). */
 import { Alert, Button, Divider, Select, Slider, Switch, Typography } from 'antd';
-import { BASE_MAPS, ICON_MAX_COUNT, ORBIT_BATCH_MAX } from '../constants';
+import { BASE_MAPS, ORBIT_BATCH_MAX } from '../constants';
 import { DEFAULT_SETTINGS } from '../hooks/useSettings';
 import type { DisplaySettings } from '../hooks/useSettings';
 import type { BaseMapKind } from './GlobeView';
@@ -47,7 +47,6 @@ export function SettingsPanel({ settings, onChange, visibleCount }: Props): JSX.
     onChange({ ...settings, [key]: value });
 
   const orbitsCapped = settings.showOrbits && visibleCount > ORBIT_BATCH_MAX;
-  const iconsCapped = settings.satelliteIcons && visibleCount > ICON_MAX_COUNT;
 
   return (
     <div className="settings">
@@ -92,48 +91,53 @@ export function SettingsPanel({ settings, onChange, visibleCount }: Props): JSX.
 
       <Toggle
         label="Icônes de satellite"
-        hint={`Silhouette de satellite au lieu d'un point, jusqu'à ${nf.format(ICON_MAX_COUNT)} objets affichés`}
+        hint="Silhouette de satellite au lieu d'un simple point, pour tous les objets affichés"
         checked={settings.satelliteIcons}
         onChange={(v) => set('satelliteIcons', v)}
       />
 
-      {iconsCapped && (
-        <Alert
-          type="info"
-          showIcon
-          className="setting-alert"
-          message={`${nf.format(visibleCount)} objets affichés : marqueurs repassés en points.`}
-          description={`Au-delà de ${nf.format(ICON_MAX_COUNT)} objets, les icônes se chevauchent et masquent la répartition. Affinez les filtres pour les retrouver.`}
-        />
+      {settings.satelliteIcons ? (
+        <>
+          <Text type="secondary">Taille des icônes : {settings.iconSize} px</Text>
+          <Slider
+            min={6}
+            max={40}
+            step={1}
+            value={settings.iconSize}
+            onChange={(v) => set('iconSize', v)}
+          />
+        </>
+      ) : (
+        <>
+          <Text type="secondary">Taille des points : {settings.pointSize} px</Text>
+          <Slider
+            min={1}
+            max={12}
+            step={0.5}
+            value={settings.pointSize}
+            onChange={(v) => set('pointSize', v)}
+          />
+        </>
       )}
 
-      <Text type="secondary">Taille de base : {settings.pointSize} px</Text>
-      <Slider
-        min={1}
-        max={12}
-        step={0.5}
-        value={settings.pointSize}
-        onChange={(v) => set('pointSize', v)}
-      />
+      <Divider orientation="left" plain>
+        Grossissement
+      </Divider>
 
-      <Text type="secondary">
-        Grossissement en vue rapprochée : × {settings.zoomBoost.toFixed(1)}
-      </Text>
+      <Text type="secondary">En approche : × {settings.zoomBoost.toFixed(1)}</Text>
       <Slider
         min={1}
-        max={14}
-        step={0.5}
+        max={6}
+        step={0.1}
         value={settings.zoomBoost}
         onChange={(v) => set('zoomBoost', v)}
         tooltip={{ formatter: (v) => `× ${v}` }}
       />
-      <Text type="secondary">
-        Point sélectionné : × {settings.selectedScale.toFixed(1)} (
-        {(settings.pointSize * settings.selectedScale).toFixed(1)} px)
-      </Text>
+
+      <Text type="secondary">Objet sélectionné : × {settings.selectedScale.toFixed(1)}</Text>
       <Slider
         min={1}
-        max={4}
+        max={3}
         step={0.1}
         value={settings.selectedScale}
         onChange={(v) => set('selectedScale', v)}
@@ -141,9 +145,9 @@ export function SettingsPanel({ settings, onChange, visibleCount }: Props): JSX.
       />
 
       <Text type="secondary" className="setting-hint">
-        Les points grossissent quand la caméra s'approche et se réduisent au loin. Augmentez
-        ces valeurs si les objets sont difficiles à viser, réduisez-les si le point
-        sélectionné masque son environnement.
+        La taille réglée plus haut est celle vue depuis l’espace. Le grossissement
+        n’intervient qu’en approche, à moins de 20 000 km de la caméra : les objets
+        éloignés conservent leur taille de référence.
       </Text>
 
       <Divider orientation="left" plain>

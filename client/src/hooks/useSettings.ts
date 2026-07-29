@@ -19,16 +19,20 @@ export interface DisplaySettings {
   /** Info-bulle au survol d'un objet. */
   hoverTooltip: boolean;
   baseMap: BaseMapKind;
-  /** Taille de base des points, en pixels. */
-  pointSize: number;
-  /** Facteur de grossissement en vue rapprochée. */
-  zoomBoost: number;
-  /** Facteur de taille du point sélectionné, relatif à la taille de base. */
-  selectedScale: number;
   /**
-   * Marqueurs en forme de satellite plutôt que simples points. Basculé
-   * automatiquement en points au-delà du seuil de lisibilité (voir ICON_MAX_COUNT).
+   * Trois réglages de taille volontairement indépendants : ils portaient
+   * auparavant sur une même valeur composée, ce qui rendait leur effet
+   * imprévisible.
    */
+  /** Diamètre des points, en pixels, tel qu'affiché en vue globe. */
+  pointSize: number;
+  /** Côté des icônes de satellite, en pixels, tel qu'affiché en vue globe. */
+  iconSize: number;
+  /** Grossissement en approche. Sans effet sur les objets éloignés. */
+  zoomBoost: number;
+  /** Facteur appliqué au seul objet sélectionné. */
+  selectedScale: number;
+  /** Marqueurs en forme de satellite plutôt que simples points. */
   satelliteIcons: boolean;
 }
 
@@ -41,9 +45,10 @@ export const DEFAULT_SETTINGS: DisplaySettings = {
   showLabel: true,
   hoverTooltip: true,
   baseMap: 'satellite',
-  pointSize: 4,
-  zoomBoost: 5,
-  selectedScale: 1.6,
+  pointSize: 3,
+  iconSize: 14,
+  zoomBoost: 2,
+  selectedScale: 1.5,
   satelliteIcons: true,
 };
 
