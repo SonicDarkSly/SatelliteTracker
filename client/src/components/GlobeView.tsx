@@ -194,13 +194,14 @@ function moonPositionFixed(time: JulianDate): Cartesian3 | undefined {
  * Comme les orbites de satellites, elle est laissée dans le repère inertiel et
  * tournée à chaque image par la matrice de modèle de sa polyligne : la
  * trajectoire reste ainsi collée à la Lune, alors qu'une conversion figée la
- * décalait à mesure que la Terre tournait. La boucle est refermée sur son
- * premier point (l'orbite précesse, elle ne se referme pas exactement).
+ * décalait à mesure que la Terre tournait. L'échantillonnage est centré sur
+ * l'instant courant (−½ à +½ mois), ce qui place la discontinuité résiduelle à
+ * l'opposé de la Lune plutôt qu'à côté d'elle.
  */
 function moonPathInertial(time: JulianDate): Cartesian3[] {
   const out: Cartesian3[] = [];
   for (let i = 0; i <= MOON_PATH_SAMPLES; i++) {
-    const seconds = (i / MOON_PATH_SAMPLES) * SIDEREAL_MONTH_DAYS * 86_400;
+    const seconds = (i / MOON_PATH_SAMPLES - 0.5) * SIDEREAL_MONTH_DAYS * 86_400;
     const sampleTime = JulianDate.addSeconds(time, seconds, new JulianDate());
     const inertial = Simon1994PlanetaryPositions.computeMoonPositionInEarthInertialFrame(
       sampleTime,
@@ -209,7 +210,6 @@ function moonPathInertial(time: JulianDate): Cartesian3[] {
     if (!inertial) return out;
     out.push(inertial);
   }
-  if (out.length > 1) out.push(Cartesian3.clone(out[0], new Cartesian3()));
   return out;
 }
 

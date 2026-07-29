@@ -155,9 +155,12 @@ function computeFrame(): void {
  * avec un temps sidéral figé produisait un décalage croissant entre le satellite
  * et sa trace, puisque la Terre continuait de tourner sous une trace immobile.
  *
- * La boucle est refermée sur son premier point : après une période, la
- * précession et la traînée ont légèrement déplacé l'orbite, ce qui laissait un
- * trou visible exactement à l'endroit du satellite.
+ * L'échantillonnage est CENTRÉ sur l'instant courant : de −½ période à +½ période.
+ * L'orbite ne se referme pas exactement sur elle-même (précession et traînée la
+ * déplacent en un tour), et la discontinuité résiduelle se retrouve ainsi à
+ * l'antipode du satellite — donc invisible — au lieu de tomber pile à côté de
+ * lui. Relier les deux extrémités par un segment, comme je l'avais d'abord fait,
+ * produit un artefact bien plus voyant : une corde en travers de l'orbite.
  */
 function computeOrbit(index: number): void {
   const rec = satrecs[index];
@@ -166,13 +169,12 @@ function computeOrbit(index: number): void {
   const startMs = simNowMs();
   // Période orbitale : rec.no est le moyen mouvement en rad/min.
   const periodMinutes = (2 * Math.PI) / rec.no;
-  const points = ORBIT_SAMPLES + 2; // + 1 borne finale, + 1 point de fermeture
-  const out = new Float32Array(points * 3);
+  const out = new Float32Array((ORBIT_SAMPLES + 1) * 3);
 
   for (let s = 0; s <= ORBIT_SAMPLES; s++) {
-    const when = new Date(startMs + (s / ORBIT_SAMPLES) * periodMinutes * 60_000);
+    const offset = (s / ORBIT_SAMPLES - 0.5) * periodMinutes * 60_000;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const pv = satellite.propagate(rec, when) as any;
+    const pv = satellite.propagate(rec, new Date(startMs + offset)) as any;
     const eci = pv?.position as EciVector | false | undefined;
     if (!eci || !Number.isFinite(eci.x)) return;
 
@@ -181,21 +183,16 @@ function computeOrbit(index: number): void {
     out[s * 3 + 2] = eci.z * 1000;
   }
 
-  const last = (points - 1) * 3;
-  out[last] = out[0];
-  out[last + 1] = out[1];
-  out[last + 2] = out[2];
-
   post({ type: 'orbit', index, positions: out }, [out.buffer]);
 }
 
 /**
  * Lot d'orbites pour les objets actuellement affichés.
- * Même principe que `computeOrbit` — repère inertiel, boucle refermée — avec un
- * échantillonnage réduit et un seul transfert pour tout le lot.
+ * Même principe que `computeOrbit` — repère inertiel, échantillonnage centré sur
+ * l'instant courant — avec un pas plus grossier et un seul transfert pour le lot.
  */
 function computeOrbits(indices: number[]): void {
-  const samples = ORBIT_BATCH_SAMPLES + 2; // borne finale + point de fermeture
+  const samples = ORBIT_BATCH_SAMPLES + 1;
   const startMs = simNowMs();
 
   const kept: number[] = [];
@@ -211,9 +208,9 @@ function computeOrbits(indices: number[]): void {
     let ok = true;
 
     for (let s = 0; s <= ORBIT_BATCH_SAMPLES; s++) {
-      const when = new Date(startMs + (s / ORBIT_BATCH_SAMPLES) * periodMinutes * 60_000);
+      const offset = (s / ORBIT_BATCH_SAMPLES - 0.5) * periodMinutes * 60_000;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const pv = satellite.propagate(rec, when) as any;
+      const pv = satellite.propagate(rec, new Date(startMs + offset)) as any;
       const eci = pv?.position as EciVector | false | undefined;
       if (!eci || !Number.isFinite(eci.x)) {
         ok = false;
@@ -225,11 +222,6 @@ function computeOrbits(indices: number[]): void {
     }
 
     if (!ok) continue; // orbite abandonnée : l'emplacement est réutilisé
-
-    const last = start + (samples - 1) * 3;
-    buffer[last] = buffer[start];
-    buffer[last + 1] = buffer[start + 1];
-    buffer[last + 2] = buffer[start + 2];
 
     kept.push(index);
     write += samples * 3;

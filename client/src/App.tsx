@@ -22,7 +22,13 @@ import { useLocalStorage } from './hooks/useLocalStorage';
 import { usePropagation } from './hooks/usePropagation';
 import { useSatelliteFilters } from './hooks/useSatelliteFilters';
 import { useSettings } from './hooks/useSettings';
-import { DEFAULT_HIDDEN_CATEGORIES, ORBIT_BATCH_MAX, STORAGE_KEYS } from './constants';
+import {
+  DEFAULT_HIDDEN_CATEGORIES,
+  ICON_MAX_COUNT,
+  MIN_USABLE_CATALOG,
+  ORBIT_BATCH_MAX,
+  STORAGE_KEYS,
+} from './constants';
 
 export default function App(): JSX.Element {
   const { snapshot, loading, refreshing, error, refresh } = useCatalog();
@@ -43,17 +49,26 @@ export default function App(): JSX.Element {
   // le logo et les crédits quittent ainsi la surface du globe.
   const creditRef = useRef<HTMLDivElement>(null);
 
+  /*
+   * On dépend des fonctions stables du hook, jamais de l'objet `propagation`
+   * complet : son identité change à chaque nouvelle orbite ou position reçue.
+   * En le mettant en dépendance, chaque effet se relançait à chaque réponse du
+   * worker, qui déclenchait un nouveau calcul, qui relançait l'effet… une boucle
+   * qui saturait le worker et empêchait les orbites de s'afficher.
+   */
+  const { simNow, track, setOrbitTargets } = propagation;
+
   // Horloge affichée : rafraîchie deux fois par seconde (indépendante du rendu 60 Hz).
   const [clockMs, setClockMs] = useState(() => Date.now());
   useEffect(() => {
-    const id = window.setInterval(() => setClockMs(propagation.simNow()), 500);
+    const id = window.setInterval(() => setClockMs(simNow()), 500);
     return () => window.clearInterval(id);
-  }, [propagation]);
+  }, [simNow]);
 
   // Le suivi (orbite nette + position géodésique) suit la sélection.
   useEffect(() => {
-    propagation.track(selectedIndex);
-  }, [selectedIndex, propagation]);
+    track(selectedIndex);
+  }, [selectedIndex, track]);
 
   /**
    * Orbites de masse : uniquement si le réglage est actif et si le nombre
@@ -65,8 +80,8 @@ export default function App(): JSX.Element {
       settings.showOrbits && visibleIndices.length > 0 && visibleIndices.length <= ORBIT_BATCH_MAX
         ? visibleIndices
         : [];
-    propagation.setOrbitTargets(targets);
-  }, [settings.showOrbits, visibleIndices, propagation]);
+    setOrbitTargets(targets);
+  }, [settings.showOrbits, visibleIndices, setOrbitTargets]);
 
   const selected = useMemo(
     () => (selectedIndex !== null ? satellites?.[selectedIndex] : undefined),
@@ -86,6 +101,32 @@ export default function App(): JSX.Element {
         : [...favorites, selected.noradId],
     );
   }, [favorites, selected, setFavorites]);
+
+  /**
+   * Catalogue réellement dégradé : trop peu d'objets pour être exploitable, ou
+   * servi depuis une copie périmée. Un simple groupe secondaire manquant ne
+   * compte pas — le catalogue « active » contient déjà tout.
+   */
+  const degraded =
+    snapshot !== undefined &&
+    snapshot.warnings.length > 0 &&
+    (snapshot.stale || snapshot.count < MIN_USABLE_CATALOG);
+
+  /**
+   * Réglages demandés par l'utilisateur mais suspendus à cette échelle.
+   * Affichés dans la barre d'état : sans cela, on active « orbites » ou
+   * « icônes » et rien ne change visiblement, sans explication.
+   */
+  const suppressed = useMemo(() => {
+    const out: { label: string; limit: number }[] = [];
+    if (settings.showOrbits && visibleCount > ORBIT_BATCH_MAX) {
+      out.push({ label: 'orbites', limit: ORBIT_BATCH_MAX });
+    }
+    if (settings.satelliteIcons && visibleCount > ICON_MAX_COUNT) {
+      out.push({ label: 'icônes', limit: ICON_MAX_COUNT });
+    }
+    return out;
+  }, [settings.showOrbits, settings.satelliteIcons, visibleCount]);
 
   /** Nombre de filtres qui s'écartent des valeurs par défaut. */
   const activeFilterCount = useMemo(() => {
@@ -202,7 +243,13 @@ export default function App(): JSX.Element {
             />
           )}
 
-          {!error && snapshot && snapshot.count > 0 && snapshot.warnings.length > 0 && (
+          {/*
+            Bandeau réservé aux catalogues réellement dégradés. Un groupe
+            secondaire manquant alors que le catalogue principal est là ne
+            justifie pas d'alerte plein écran : l'information reste consultable
+            dans la barre d'état, où le détail des sources est affiché.
+          */}
+          {!error && snapshot && degraded && (
             <Alert
               className="floating-alert"
               type="warning"
@@ -236,6 +283,7 @@ export default function App(): JSX.Element {
           propagableCount={propagation.propagableCount}
           visibleCount={visibleCount}
           baseMap={settings.baseMap}
+          suppressed={suppressed}
         />
 
         <Drawer

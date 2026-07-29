@@ -81,3 +81,10 @@ export const ORBIT_BATCH_MAX = 200;
  * avant d'être lent. Le basculement est automatique et signalé dans les réglages.
  */
 export const ICON_MAX_COUNT = 2500;
+
+/**
+ * Seuil en dessous duquel on considère le catalogue dégradé et on alerte
+ * l'utilisateur. Le catalogue complet dépasse 15 000 objets ; quelques centaines
+ * signifient qu'une source majeure manque. Même valeur que le garde-fou serveur.
+ */
+export const MIN_USABLE_CATALOG = 1000;

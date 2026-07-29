@@ -20,6 +20,8 @@ interface Props {
   propagableCount: number;
   visibleCount: number;
   baseMap: BaseMapKind;
+  /** Réglages demandés mais suspendus faute de lisibilité, avec leur plafond. */
+  suppressed: { label: string; limit: number }[];
 }
 
 /**
@@ -28,7 +30,7 @@ interface Props {
  * attributions, regroupées avec les autres sources de données.
  */
 export const StatusBar = forwardRef<HTMLDivElement, Props>(function StatusBar(
-  { snapshot, propagableCount, visibleCount, baseMap },
+  { snapshot, propagableCount, visibleCount, baseMap, suppressed },
   creditRef,
 ) {
   const failed = snapshot?.sources.filter((s) => !s.ok) ?? [];
@@ -82,6 +84,30 @@ export const StatusBar = forwardRef<HTMLDivElement, Props>(function StatusBar(
               </Text>
             </Tooltip>
           </>
+        )}
+
+        {/*
+          Réglages activés mais sans effet visible à cette échelle. Sans cette
+          mention, l'utilisateur active « orbites » ou « icônes » et ne voit rien
+          changer, l'explication étant enfouie dans le panneau de réglages.
+        */}
+        {suppressed.length > 0 && (
+          <Tooltip
+            title={suppressed
+              .map(
+                (s) =>
+                  `${s.label} : au-delà de ${nf.format(s.limit)} objets affichés, l’affichage devient illisible. Affinez les filtres.`,
+              )
+              .join(' ')}
+          >
+            <Space size={4} className="clickable">
+              <Badge status="default" />
+              <Text type="secondary">
+                {suppressed.map((s) => s.label).join(' et ')} en attente (
+                {nf.format(visibleCount)} objets affichés)
+              </Text>
+            </Space>
+          </Tooltip>
         )}
 
         <Text type="secondary" className="statusbar-sources">

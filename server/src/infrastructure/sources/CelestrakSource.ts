@@ -22,6 +22,21 @@ import { celestrakGroupUrl, maxEpochAgeDays } from '../config/celestrak.js';
 const BLOCK_BACKOFF_INITIAL_MS = 10 * 60 * 1000;
 const BLOCK_BACKOFF_MAX_MS = 2 * 60 * 60 * 1000;
 
+/**
+ * Heure locale au format court.
+ *
+ * Les messages d'erreur finissent dans l'instantané mis en cache sur disque :
+ * un délai relatif (« dans 23 min ») y devient faux dès la minute suivante et
+ * reste affiché tel quel pendant des heures. Une heure absolue, elle, reste
+ * juste et permet de voir d'un coup d'œil que l'information est ancienne.
+ */
+function formatTime(epochMs: number): string {
+  return new Date(epochMs).toLocaleTimeString('fr-FR', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 export class CelestrakSource implements TleSourcePort {
   private readonly logger = new Logger(CelestrakSource.name);
   /** Instant avant lequel toute nouvelle tentative est inutile. */
@@ -38,9 +53,9 @@ export class CelestrakSource implements TleSourcePort {
     const url = celestrakGroupUrl(this.id);
 
     if (Date.now() < this.blockedUntil) {
-      const minutes = Math.ceil((this.blockedUntil - Date.now()) / 60_000);
       return this.failure(
-        `accès temporairement refusé par Celestrak (limite de débit) — nouvelle tentative dans ${minutes} min`,
+        'accès temporairement refusé par Celestrak (limite de débit) — ' +
+          `nouvelle tentative à partir de ${formatTime(this.blockedUntil)}`,
         false,
       );
     }
@@ -50,11 +65,10 @@ export class CelestrakSource implements TleSourcePort {
 
       if (response.status === 403) {
         this.blockedUntil = Date.now() + this.backoffMs;
-        const minutes = Math.round(this.backoffMs / 60_000);
         this.backoffMs = Math.min(this.backoffMs * 2, BLOCK_BACKOFF_MAX_MS);
         return this.failure(
           'HTTP 403 — Celestrak limite le débit (trop de requêtes récentes). ' +
-            `Les données en cache restent utilisées ; nouvelle tentative dans ${minutes} min.`,
+            `Les données en cache restent utilisées ; nouvelle tentative à partir de ${formatTime(this.blockedUntil)}.`,
         );
       }
 
