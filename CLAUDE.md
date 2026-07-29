@@ -10,15 +10,29 @@ CQRS côté serveur, React + Vite + Ant Design côté client, lanceurs double-cl
 - **100 % local** : aucun compte, aucune clé d'API, aucun service payant. Le seul appel
   sortant est la récupération des TLE sur celestrak.org. Le fond de carte Cesium est la
   texture Natural Earth II livrée avec la bibliothèque → fonctionne hors ligne.
-- **Ne pas spammer Celestrak** : une seule récupération toutes les 2 h, une seule
-  récupération concurrente (`inFlight` dans `SatelliteCatalogService`), pause de courtoisie
-  entre groupes. Ne pas ajouter de groupes sans raison : `active` contient déjà tout.
+- **Ne pas spammer Celestrak — leçon apprise à la dure.** Celestrak renvoie **HTTP 403
+  pendant une à deux heures** quand on redemande les mêmes données trop souvent. C'est
+  arrivé en développement : `node --watch` redémarrait le serveur à chaque édition, et
+  chaque redémarrage retéléchargeait 5 fichiers. Les protections en place, à ne pas
+  retirer :
+  - cache **disque** (`server/data/`) pour le catalogue et le SATCAT → un redémarrage ne
+    déclenche aucun appel réseau ;
+  - backoff d'1 h par source après un 403 (`CelestrakSource.blockedUntil`) ;
+  - intervalle minimal de 5 min entre deux rafraîchissements forcés ;
+  - une seule récupération concurrente (`inFlight`), pause de courtoisie entre requêtes ;
+  - deux groupes par défaut seulement (`active` contient déjà tout le reste).
+- **Ne jamais persister un catalogue partiel.** Un résultat accompagné d'avertissements et
+  de moins de 1 000 objets n'est pas mis en cache, et un résultat 10 % plus pauvre que le
+  cache existant ne le remplace pas. Sans ces règles, un seul 403 sur `active` fige un
+  catalogue de 22 objets pendant des heures — c'est exactement le bug qu'on a eu.
 - **Aucun calcul de position côté serveur.** C'est la décision d'architecture centrale :
   le serveur sert des TLE, le navigateur propage. Ne pas introduire de WebSocket qui
   pousserait des positions — ce serait un recul de deux ordres de grandeur en coût.
-- **Pas de persistance** pour l'instant : cache mémoire côté serveur, localStorage côté
-  client. Les ports (`CatalogCachePort`) sont là pour brancher un adapter fichier/Redis
-  sans toucher au domaine si le besoin apparaît.
+- **Persistance minimale, par nécessité** : deux fichiers JSON dans `server/data/`
+  (gitignoré) via `FileCatalogCache` et `CachedMetadataSource`. Pas de base de données.
+  Côté client, uniquement les préférences en localStorage — **jamais le catalogue** :
+  6 Mo dépassent le quota, l'écriture échouait en silence et une copie partielle restait
+  servie des heures.
 - Réponses et échanges **en français**.
 - **Commentaires de code** : garder le « pourquoi » et les en-têtes d'architecture, éviter
   les commentaires qui répètent le code.

@@ -21,8 +21,20 @@ import {
   countRegimes,
   mergeSatellites,
 } from '../domain/services/mergeCatalogs.js';
-import { catalogTtlMs, satcatTtlMs } from '../infrastructure/config/celestrak.js';
+import { catalogTtlMs } from '../infrastructure/config/celestrak.js';
 import { politePause } from '../infrastructure/http/fetch.js';
+
+/** Intervalle minimal entre deux rafraîchissements forcés (5 min). */
+const FORCE_MIN_INTERVAL_MS = 5 * 60 * 1000;
+
+/**
+ * Taille en dessous de laquelle un catalogue accompagné d'un avertissement est
+ * jugé invraisemblable. Le catalogue réel compte plus de 15 000 objets ; quelques
+ * centaines signifient qu'une source majeure a échoué (typiquement `active` en
+ * 403) et que seuls des groupes secondaires ont répondu. Un tel résultat est
+ * affiché mais jamais écrit sur disque : sinon il resterait servi des heures.
+ */
+const MIN_PLAUSIBLE_CATALOG = 1000;
 
 @Injectable()
 export class SatelliteCatalogService {
@@ -39,9 +51,6 @@ export class SatelliteCatalogService {
    */
   private readonly lastGoodLots = new Map<string, SatelliteRecord[]>();
 
-  /** SATCAT en mémoire : rarement modifié, coûteux à télécharger (~4 Mo). */
-  private metadata: { byNoradId: Map<string, SatelliteMetadata>; storedAt: number } | undefined;
-
   constructor(
     @Inject(TLE_SOURCES) private readonly sources: TleSourcePort[],
     @Inject(METADATA_SOURCE) private readonly metadataSource: SatelliteMetadataPort,
@@ -57,6 +66,23 @@ export class SatelliteCatalogService {
     const fresh = cached !== undefined && Date.now() - cached.storedAt < catalogTtlMs();
 
     if (!force && cached && fresh) return cached.snapshot;
+
+    /*
+     * Rafraîchissement forcé (bouton de l'interface) : on impose un intervalle
+     * minimal. Sans ce garde-fou, quelques clics successifs suffisent à déclencher
+     * la limite de débit de Celestrak, qui répond alors 403 pendant une heure.
+     */
+    if (force && cached && Date.now() - cached.storedAt < FORCE_MIN_INTERVAL_MS) {
+      const seconds = Math.ceil(
+        (FORCE_MIN_INTERVAL_MS - (Date.now() - cached.storedAt)) / 1000,
+      );
+      this.logger.log(
+        `Rafraîchissement demandé trop tôt (données de ${Math.round((Date.now() - cached.storedAt) / 1000)} s) — ` +
+          `cache conservé, nouvelle tentative possible dans ${seconds} s.`,
+      );
+      return cached.snapshot;
+    }
+
     if (this.inFlight) return this.inFlight;
 
     this.inFlight = this.refresh().finally(() => {
@@ -114,19 +140,29 @@ export class SatelliteCatalogService {
       );
     }
 
-    const satellites = await this.enrich(mergeSatellites(lots), warnings);
+    const merged = mergeSatellites(lots);
 
-    // Toutes les sources en échec : on préfère servir un cache périmé plutôt que rien.
-    if (satellites.length === 0) {
-      const cached = this.cache.read();
-      if (cached) {
-        this.logger.warn(
-          'Sources injoignables — catalogue servi depuis le cache précédent (données périmées).',
-        );
-        return { ...cached.snapshot, stale: true, sources: statuses, warnings };
-      }
+    /*
+     * Garde-fou : si une source a échoué et que le résultat est nettement plus
+     * pauvre que le catalogue déjà en cache, on garde le cache. C'est le cas au
+     * démarrage quand Celestrak renvoie 403 sur le groupe « active » : les
+     * groupes secondaires répondent, et on obtiendrait 439 objets au lieu de
+     * 16 000 — un catalogue faux plutôt qu'un catalogue un peu vieux.
+     */
+    const cached = this.cache.read();
+    if (warnings.length > 0 && cached && merged.length < cached.snapshot.count * 0.9) {
+      this.logger.warn(
+        `Résultat incomplet (${merged.length} objets contre ${cached.snapshot.count} en cache) — ` +
+          'catalogue précédent conservé.',
+      );
+      return { ...cached.snapshot, stale: true, sources: statuses, warnings };
+    }
+
+    if (merged.length === 0) {
       this.logger.error('Sources injoignables et aucun cache disponible.');
     }
+
+    const satellites = await this.enrich(merged, warnings);
 
     const now = new Date().toISOString();
     const snapshot: CatalogSnapshot = {
@@ -142,7 +178,17 @@ export class SatelliteCatalogService {
       warnings,
     };
 
-    if (satellites.length > 0) this.cache.write(snapshot);
+    // Un résultat incomplet et invraisemblablement petit est affiché mais jamais
+    // persisté : il serait ensuite servi depuis le disque pendant des heures.
+    const suspicious = warnings.length > 0 && satellites.length < MIN_PLAUSIBLE_CATALOG;
+    if (satellites.length > 0 && !suspicious) {
+      this.cache.write(snapshot);
+    } else if (suspicious) {
+      this.logger.warn(
+        `Catalogue de ${satellites.length} objets avec avertissements — non mis en cache ` +
+          '(une source majeure a échoué, le résultat serait trompeur).',
+      );
+    }
 
     this.logger.log(
       `Catalogue prêt : ${satellites.length} objets en ${((Date.now() - startedAt) / 1000).toFixed(1)} s ` +
@@ -190,27 +236,22 @@ export class SatelliteCatalogService {
     return enriched;
   }
 
-  /** SATCAT depuis le cache mémoire, sinon récupération. */
+  /**
+   * Registre SATCAT. La mise en cache (mémoire + disque) et le repli sur une
+   * copie périmée sont assurés par l'adapter décorateur : ici on se contente
+   * d'appeler le port et de signaler une absence de données.
+   */
   private async loadMetadata(
     warnings: string[],
   ): Promise<Map<string, SatelliteMetadata> | undefined> {
-    if (this.metadata && Date.now() - this.metadata.storedAt < satcatTtlMs()) {
-      return this.metadata.byNoradId;
-    }
-
     await politePause();
     const result = await this.metadataSource.fetchMetadata();
 
-    if (result.ok && result.byNoradId.size > 0) {
-      this.metadata = { byNoradId: result.byNoradId, storedAt: Date.now() };
-      return result.byNoradId;
-    }
+    if (result.ok && result.byNoradId.size > 0) return result.byNoradId;
 
     warnings.push(
-      this.metadata
-        ? `${result.label} indisponible (${result.error ?? 'erreur'}) — registre précédent réutilisé`
-        : `${result.label} indisponible : ${result.error ?? 'erreur'} — pays et organismes non renseignés`,
+      `${result.label} indisponible : ${result.error ?? 'erreur'} — pays et organismes non renseignés`,
     );
-    return this.metadata?.byNoradId;
+    return undefined;
   }
 }

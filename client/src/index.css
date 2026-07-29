@@ -324,31 +324,70 @@ body {
   min-width: 200px;
 }
 
-/* Crédits Cesium déportés ici : on les aligne sur la typographie de la barre. */
+/* ------------------------- crédits Cesium déportés ----------------------- */
+
+/*
+ * Cesium style `.cesium-widget-credits` en `position: absolute; bottom: 0;
+ * left: 0` et ne remet `position: static` que sous `.cesium-viewer`. Notre
+ * conteneur étant hors du widget, le bloc se collait en bas à gauche de la page
+ * et chevauchait la barre d'état : il faut donc annuler ce positionnement.
+ */
 .cesium-credit-host {
-  display: flex;
+  position: relative;
+  display: inline-flex;
   align-items: center;
-  opacity: 0.55;
+  gap: 6px;
+  opacity: 0.6;
   font-size: 11px;
+  line-height: 1;
 }
 
-.cesium-credit-host .cesium-widget-credits,
-.cesium-credit-host .cesium-credit-textContainer,
-.cesium-credit-host .cesium-credit-logoContainer {
+.cesium-credit-host .cesium-widget-credits {
+  position: static !important;
+  bottom: auto !important;
+  left: auto !important;
   display: inline-flex !important;
   align-items: center;
+  gap: 6px;
+  padding: 0 !important;
+  margin: 0;
   font-size: 11px;
   color: inherit;
+  text-shadow: none;
+}
+
+.cesium-credit-host .cesium-credit-textContainer,
+.cesium-credit-host .cesium-credit-wrapper {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 4px;
+}
+
+/*
+ * Logo « Cesium ion » masqué : l'application n'utilise aucun service ion
+ * (imagerie tuilée publique ou texture locale). L'attribution du moteur de rendu
+ * est portée par la mention « Rendu : CesiumJS » de la ligne des sources.
+ */
+.cesium-credit-host .cesium-credit-logoContainer {
+  display: none !important;
+}
+
+.cesium-credit-host .cesium-credit-expand {
+  color: inherit;
+  font-size: 11px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
 }
 
 .cesium-credit-host img {
-  max-height: 14px;
+  max-height: 13px;
   width: auto;
+  vertical-align: middle;
 }
 
 .cesium-credit-host a {
   color: inherit;
-  text-decoration: none;
 }
 
 .source-detail > div {

@@ -100,6 +100,24 @@ const MAX_ZOOM_OUT_M = 1.2e9;
 const moonScratch = new Cartesian3();
 const moonFixedScratch = new Cartesian3();
 const icrfScratch = new Matrix3();
+const timeScratch = new JulianDate();
+const speedScratchA = new Cartesian3();
+const speedScratchB = new Cartesian3();
+
+/**
+ * Mois sidéral : durée d'une révolution complète de la Lune autour de la Terre
+ * par rapport aux étoiles (27,32 jours). C'est la période à échantillonner pour
+ * obtenir une trajectoire fermée — le mois synodique de 29,53 jours, lui, mesure
+ * le retour des phases et ne boucle pas géométriquement.
+ */
+const SIDEREAL_MONTH_DAYS = 27.321661;
+
+/** Points d'échantillonnage de la trajectoire lunaire. */
+const MOON_PATH_SAMPLES = 240;
+
+/** Intervalles de rafraîchissement de la trajectoire et de l'étiquette lunaires (ms). */
+const MOON_PATH_REFRESH_MS = 5000;
+const MOON_LABEL_REFRESH_MS = 500;
 
 interface HoverInfo {
   index: number;
@@ -144,6 +162,52 @@ function moonPositionFixed(time: JulianDate): Cartesian3 | undefined {
   if (!defined(rotation)) return undefined;
 
   return Matrix3.multiplyByVector(rotation, inertial, moonFixedScratch);
+}
+
+/**
+ * Trajectoire lunaire sur un mois sidéral, dans le repère terrestre.
+ *
+ * Comme pour les orbites de satellites, tous les points sont tournés avec la
+ * MÊME matrice (celle de l'instant de référence) : on obtient l'ellipse telle
+ * qu'elle existe dans l'espace. Sans cela, la rotation de la Terre étalerait la
+ * trajectoire en 27 spires.
+ */
+function moonPathFixed(time: JulianDate): Cartesian3[] {
+  const rotation =
+    Transforms.computeIcrfToFixedMatrix(time, icrfScratch) ??
+    Transforms.computeTemeToPseudoFixedMatrix(time, icrfScratch);
+  if (!defined(rotation)) return [];
+
+  const out: Cartesian3[] = [];
+  for (let i = 0; i <= MOON_PATH_SAMPLES; i++) {
+    const seconds = (i / MOON_PATH_SAMPLES) * SIDEREAL_MONTH_DAYS * 86_400;
+    const sampleTime = JulianDate.addSeconds(time, seconds, new JulianDate());
+    const inertial = Simon1994PlanetaryPositions.computeMoonPositionInEarthInertialFrame(
+      sampleTime,
+      new Cartesian3(),
+    );
+    if (!inertial) return out;
+    out.push(Matrix3.multiplyByVector(rotation, inertial, new Cartesian3()));
+  }
+  return out;
+}
+
+/**
+ * Vitesse orbitale de la Lune, par différence centrée sur ±60 s dans le repère
+ * inertiel (≈ 1,02 km/s, variable de quelques pourcents entre périgée et apogée
+ * du fait de l'excentricité de 0,055).
+ */
+function moonSpeedKmS(time: JulianDate): number {
+  const before = Simon1994PlanetaryPositions.computeMoonPositionInEarthInertialFrame(
+    JulianDate.addSeconds(time, -60, timeScratch),
+    speedScratchA,
+  );
+  const after = Simon1994PlanetaryPositions.computeMoonPositionInEarthInertialFrame(
+    JulianDate.addSeconds(time, 60, timeScratch),
+    speedScratchB,
+  );
+  if (!before || !after) return 0;
+  return Cartesian3.distance(before, after) / 120 / 1000;
 }
 
 /** Couche d'imagerie correspondant au fond choisi. */
@@ -194,6 +258,10 @@ export function GlobeView({
   const trackedOrbitRef = useRef<PolylineCollection | undefined>(undefined);
   /** Orbites de masse (traits fins et translucides). */
   const batchOrbitsRef = useRef<PolylineCollection | undefined>(undefined);
+  /** Trajectoire lunaire. */
+  const moonPathRef = useRef<PolylineCollection | undefined>(undefined);
+  /** Horodatages du dernier recalcul lunaire (trajectoire et étiquette). */
+  const moonTimersRef = useRef({ path: 0, label: 0 });
 
   // Références lues dans la boucle de rendu : évitent de recréer la scène à
   // chaque changement de filtre ou de sélection.
@@ -202,11 +270,13 @@ export function GlobeView({
   const satellitesRef = useRef(satellites);
   const showLabelRef = useRef(settings.showLabel);
   const moonRef = useRef(settings.moon);
+  const moonOrbitRef = useRef(settings.moonOrbit);
   visibleRef.current = visible;
   selectedRef.current = selectedIndex;
   satellitesRef.current = satellites;
   showLabelRef.current = settings.showLabel;
   moonRef.current = settings.moon;
+  moonOrbitRef.current = settings.moonOrbit;
 
   /** Dernière position connue du curseur dans le canvas (undefined = curseur sorti). */
   const cursorRef = useRef<Cartesian2 | undefined>(undefined);
@@ -294,6 +364,7 @@ export function GlobeView({
 
     const points = viewer.scene.primitives.add(new PointPrimitiveCollection());
     const batchOrbits = viewer.scene.primitives.add(new PolylineCollection());
+    const moonPath = viewer.scene.primitives.add(new PolylineCollection());
     const trackedOrbit = viewer.scene.primitives.add(new PolylineCollection());
     const labels = viewer.scene.primitives.add(new LabelCollection());
 
@@ -302,6 +373,7 @@ export function GlobeView({
     labelsRef.current = labels;
     trackedOrbitRef.current = trackedOrbit;
     batchOrbitsRef.current = batchOrbits;
+    moonPathRef.current = moonPath;
 
     const handler = new ScreenSpaceEventHandler(viewer.scene.canvas);
 
@@ -373,18 +445,54 @@ export function GlobeView({
         }
       }
 
-      // Étiquette de la Lune, avec sa distance instantanée au centre de la Terre.
-      if (labelCollection && labelCollection.length > 1) {
-        const moonLabel = labelCollection.get(1);
-        if (!moonRef.current) {
-          if (moonLabel.show) moonLabel.show = false;
-        } else {
-          const position = moonPositionFixed(viewer.clock.currentTime);
-          if (position) {
-            moonLabel.position = position;
-            moonLabel.text = `Lune — ${Math.round(Cartesian3.magnitude(position) / 1000).toLocaleString('fr-FR')} km`;
-            moonLabel.show = true;
+      // Lune : étiquette (distance et vitesse instantanées) et trajectoire.
+      const moonLabel = labelCollection && labelCollection.length > 1 ? labelCollection.get(1) : undefined;
+      const moonPathCollection = moonPathRef.current;
+
+      if (!moonRef.current) {
+        if (moonLabel?.show) moonLabel.show = false;
+        if (moonPathCollection && moonPathCollection.length > 0) moonPathCollection.removeAll();
+      } else {
+        const now = performance.now();
+        const time = viewer.clock.currentTime;
+        const position = moonPositionFixed(time);
+
+        if (position && moonLabel) {
+          // La position suit chaque image ; le texte n'est reformaté que deux
+          // fois par seconde (formatage de chaînes en boucle de rendu = gâchis).
+          moonLabel.position = position;
+          moonLabel.show = true;
+          if (now - moonTimersRef.current.label > MOON_LABEL_REFRESH_MS) {
+            moonTimersRef.current.label = now;
+            const km = Math.round(Cartesian3.magnitude(position) / 1000);
+            moonLabel.text =
+              `Lune — ${km.toLocaleString('fr-FR')} km · ` +
+              `${moonSpeedKmS(time).toFixed(3)} km/s`;
           }
+        }
+
+        // La trajectoire est figée dans le repère inertiel au moment du calcul :
+        // elle glisse lentement par rapport au repère terrestre, d'où le
+        // recalcul périodique (même raison que pour les orbites de satellites).
+        if (
+          moonPathCollection &&
+          moonOrbitRef.current &&
+          now - moonTimersRef.current.path > MOON_PATH_REFRESH_MS
+        ) {
+          moonTimersRef.current.path = now;
+          const path = moonPathFixed(time);
+          moonPathCollection.removeAll();
+          if (path.length > 1) {
+            moonPathCollection.add({
+              positions: path,
+              width: 1.4,
+              material: Material.fromType('Color', {
+                color: Color.fromCssColorString('#d9d9d9').withAlpha(0.4),
+              }),
+            });
+          }
+        } else if (moonPathCollection && !moonOrbitRef.current && moonPathCollection.length > 0) {
+          moonPathCollection.removeAll();
         }
       }
     };
@@ -401,6 +509,7 @@ export function GlobeView({
       labelsRef.current = undefined;
       trackedOrbitRef.current = undefined;
       batchOrbitsRef.current = undefined;
+      moonPathRef.current = undefined;
     };
     // Volontairement monté une seule fois : les mises à jour passent par les refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps

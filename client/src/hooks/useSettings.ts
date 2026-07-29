@@ -12,6 +12,8 @@ export interface DisplaySettings {
   atmosphere: boolean;
   /** Lune à sa position, sa taille et sa distance réelles. */
   moon: boolean;
+  /** Trajectoire lunaire (un mois sidéral) et vitesse orbitale instantanée. */
+  moonOrbit: boolean;
   /** Nom du satellite suivi affiché sur le globe. */
   showLabel: boolean;
   /** Info-bulle au survol d'un objet. */
@@ -28,6 +30,7 @@ export const DEFAULT_SETTINGS: DisplaySettings = {
   lighting: true,
   atmosphere: true,
   moon: true,
+  moonOrbit: true,
   showLabel: true,
   hoverTooltip: true,
   baseMap: 'satellite',

@@ -154,6 +154,13 @@ export function SettingsPanel({ settings, onChange, visibleCount }: Props): JSX.
         onChange={(v) => set('moon', v)}
       />
 
+      <Toggle
+        label="Trajectoire lunaire"
+        hint="Orbite sur un mois sidéral (27,32 j), distance et vitesse instantanées (≈ 1,02 km/s)"
+        checked={settings.moonOrbit}
+        onChange={(v) => set('moonOrbit', v)}
+      />
+
       <Divider plain />
       <Button block onClick={() => onChange(DEFAULT_SETTINGS)}>
         Réglages par défaut

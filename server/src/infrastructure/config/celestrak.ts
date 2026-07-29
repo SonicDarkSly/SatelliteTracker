@@ -17,17 +17,18 @@ export interface CelestrakGroup {
 
 /**
  * Groupes récupérés par défaut :
- *   active         — tout le catalogue des objets actifs (~11 000 objets)
- *   stations       — ISS, CSS et véhicules amarrés (petit fichier, tag fiable)
- *   visual         — objets les plus brillants à l'œil nu
- *   last-30-days   — lancements récents (les plus mal identifiés par le nom)
- * Surchargeable via CELESTRAK_GROUPS="active,stations,starlink".
+ *   active    — tout le catalogue des objets actifs (~16 000 objets)
+ *   stations  — ISS, CSS et véhicules amarrés (petit fichier, étiquetage fiable)
+ *
+ * Volontairement limité à deux requêtes. `active` contient déjà tout le reste ;
+ * chaque groupe supplémentaire ne fait qu'affiner l'étiquetage tout en
+ * rapprochant de la limite de débit de Celestrak, qui répond 403 pendant une
+ * heure quand elle est atteinte. Surchargeable via
+ * CELESTRAK_GROUPS="active,stations,visual,last-30-days".
  */
 export const DEFAULT_GROUPS: CelestrakGroup[] = [
   { id: 'active', label: 'Catalogue actif' },
   { id: 'stations', label: 'Stations spatiales' },
-  { id: 'visual', label: 'Objets visibles à l’œil nu' },
-  { id: 'last-30-days', label: 'Lancements des 30 derniers jours' },
 ];
 
 const GROUP_LABELS: Record<string, string> = {
