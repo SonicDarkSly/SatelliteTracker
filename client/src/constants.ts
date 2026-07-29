@@ -73,3 +73,11 @@ export const STORAGE_KEYS = {
  * de quelques centaines, le globe devient illisible bien avant d'être lent.
  */
 export const ORBIT_BATCH_MAX = 200;
+
+/**
+ * Nombre d'objets au-delà duquel les marqueurs repassent en simples points.
+ * Une icône de satellite occupe une vingtaine de pixels : à plusieurs milliers
+ * d'objets simultanés, elles se chevauchent et l'écran devient illisible bien
+ * avant d'être lent. Le basculement est automatique et signalé dans les réglages.
+ */
+export const ICON_MAX_COUNT = 2500;

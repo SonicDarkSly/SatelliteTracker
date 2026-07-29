@@ -148,19 +148,26 @@ function computeFrame(): void {
 
 /**
  * Ellipse orbitale d'un objet, échantillonnée sur une période complète.
- * Toutes les positions sont converties avec le MÊME temps sidéral : on obtient
- * l'orbite telle qu'elle existe dans le repère inertiel, figée à cet instant
- * (sinon la rotation terrestre la transformerait en spirale).
+ *
+ * Les positions restent dans le repère INERTIEL (TEME), sans conversion vers le
+ * repère terrestre : c'est la couche de rendu qui applique la rotation de la
+ * Terre à chaque image, via la matrice de modèle de la polyligne. Convertir ici
+ * avec un temps sidéral figé produisait un décalage croissant entre le satellite
+ * et sa trace, puisque la Terre continuait de tourner sous une trace immobile.
+ *
+ * La boucle est refermée sur son premier point : après une période, la
+ * précession et la traînée ont légèrement déplacé l'orbite, ce qui laissait un
+ * trou visible exactement à l'endroit du satellite.
  */
 function computeOrbit(index: number): void {
   const rec = satrecs[index];
   if (!rec || valid[index] === 0) return;
 
   const startMs = simNowMs();
-  const gmst = satellite.gstime(new Date(startMs));
   // Période orbitale : rec.no est le moyen mouvement en rad/min.
   const periodMinutes = (2 * Math.PI) / rec.no;
-  const out = new Float32Array((ORBIT_SAMPLES + 1) * 3);
+  const points = ORBIT_SAMPLES + 2; // + 1 borne finale, + 1 point de fermeture
+  const out = new Float32Array(points * 3);
 
   for (let s = 0; s <= ORBIT_SAMPLES; s++) {
     const when = new Date(startMs + (s / ORBIT_SAMPLES) * periodMinutes * 60_000);
@@ -169,24 +176,27 @@ function computeOrbit(index: number): void {
     const eci = pv?.position as EciVector | false | undefined;
     if (!eci || !Number.isFinite(eci.x)) return;
 
-    const ecf = satellite.eciToEcf(eci, gmst) as EciVector;
-    out[s * 3] = ecf.x * 1000;
-    out[s * 3 + 1] = ecf.y * 1000;
-    out[s * 3 + 2] = ecf.z * 1000;
+    out[s * 3] = eci.x * 1000;
+    out[s * 3 + 1] = eci.y * 1000;
+    out[s * 3 + 2] = eci.z * 1000;
   }
+
+  const last = (points - 1) * 3;
+  out[last] = out[0];
+  out[last + 1] = out[1];
+  out[last + 2] = out[2];
 
   post({ type: 'orbit', index, positions: out }, [out.buffer]);
 }
 
 /**
  * Lot d'orbites pour les objets actuellement affichés.
- * Même principe que `computeOrbit` (temps sidéral figé), mais avec un
+ * Même principe que `computeOrbit` — repère inertiel, boucle refermée — avec un
  * échantillonnage réduit et un seul transfert pour tout le lot.
  */
 function computeOrbits(indices: number[]): void {
-  const samples = ORBIT_BATCH_SAMPLES + 1;
+  const samples = ORBIT_BATCH_SAMPLES + 2; // borne finale + point de fermeture
   const startMs = simNowMs();
-  const gmst = satellite.gstime(new Date(startMs));
 
   const kept: number[] = [];
   const buffer = new Float32Array(indices.length * samples * 3);
@@ -200,7 +210,7 @@ function computeOrbits(indices: number[]): void {
     const start = write;
     let ok = true;
 
-    for (let s = 0; s < samples; s++) {
+    for (let s = 0; s <= ORBIT_BATCH_SAMPLES; s++) {
       const when = new Date(startMs + (s / ORBIT_BATCH_SAMPLES) * periodMinutes * 60_000);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const pv = satellite.propagate(rec, when) as any;
@@ -209,13 +219,18 @@ function computeOrbits(indices: number[]): void {
         ok = false;
         break;
       }
-      const ecf = satellite.eciToEcf(eci, gmst) as EciVector;
-      buffer[start + s * 3] = ecf.x * 1000;
-      buffer[start + s * 3 + 1] = ecf.y * 1000;
-      buffer[start + s * 3 + 2] = ecf.z * 1000;
+      buffer[start + s * 3] = eci.x * 1000;
+      buffer[start + s * 3 + 1] = eci.y * 1000;
+      buffer[start + s * 3 + 2] = eci.z * 1000;
     }
 
     if (!ok) continue; // orbite abandonnée : l'emplacement est réutilisé
+
+    const last = start + (samples - 1) * 3;
+    buffer[last] = buffer[start];
+    buffer[last + 1] = buffer[start + 1];
+    buffer[last + 2] = buffer[start + 2];
+
     kept.push(index);
     write += samples * 3;
   }

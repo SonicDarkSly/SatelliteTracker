@@ -74,8 +74,27 @@ Lanceurs double-clic : `Lancer-SatelliteTracker-{macOS.command,Windows.bat,Linux
 - **Fond de carte** : `TileMapServiceImageryProvider` sur
   `buildModuleUrl('Assets/Textures/NaturalEarthII')`, via `ImageryLayer.fromProviderAsync`.
   Ne pas repasser sur un fournisseur Cesium ion (compte + jeton requis).
-- **Repères** : SGP4 sort de l'ECI (inertiel) ; Cesium affiche en ECEF (tournant). D'où
-  `eciToEcf(vecteur, gmst)` sur la position **et** la vitesse, puis km → m.
+- **Repères — point délicat du projet.** SGP4 sort de l'ECI/TEME (inertiel) ; Cesium
+  affiche en ECEF (tournant).
+  - **Positions des marqueurs** : converties dans le worker par
+    `eciToEcf(vecteur, gmst)`, sur la position **et** la vitesse, puis km → m.
+  - **Traces orbitales** (satellites et Lune) : laissées en **repère inertiel** et
+    tournées à chaque image par la `modelMatrix` de leur `PolylineCollection`
+    (`Transforms.computeTemeToPseudoFixedMatrix` pour les satellites,
+    `computeIcrfToFixedMatrix` pour la Lune). Ne pas revenir à une conversion figée au
+    moment du calcul : la Terre continuant de tourner sous une trace immobile, le
+    satellite s'écartait de sa propre trace d'environ **0,5 km par seconde** écoulée.
+    Vérifié que les deux conventions coïncident au mètre près (écart mesuré : 0,0 m).
+  - Les traces sont **refermées** sur leur premier point : après une période, précession
+    et traînée ont déplacé l'orbite, ce qui laissait un trou pile à l'endroit du
+    satellite.
+- **Extrapolation entre deux trames** : `p + v·Δt` où Δt est le temps **simulé**, soit
+  Δt réel × facteur d'accélération. Oublier le facteur laissait le marqueur très loin
+  derrière sa position réelle en × 60 et au-delà.
+- **Deux collections de marqueurs** (`PointPrimitiveCollection` et `BillboardCollection`),
+  une seule alimentée et visible à la fois selon le réglage et le nombre d'objets
+  (`ICON_MAX_COUNT`). Toujours interroger la collection **active** (`activeMarkers()`)
+  pour le survol, l'étiquette et le recentrage : l'autre porte des positions périmées.
 - **Boucle de rendu** : les positions ne passent pas par l'état React (11 000 objets ×
   60 Hz). Le worker écrit dans des `Float32Array` transférés, `GlobeView` les lit dans
   `scene.preUpdate` via `frameRef`. Seuls les compteurs et la fiche du satellite suivi

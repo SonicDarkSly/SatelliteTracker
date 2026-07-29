@@ -25,6 +25,11 @@ export interface DisplaySettings {
   zoomBoost: number;
   /** Facteur de taille du point sélectionné, relatif à la taille de base. */
   selectedScale: number;
+  /**
+   * Marqueurs en forme de satellite plutôt que simples points. Basculé
+   * automatiquement en points au-delà du seuil de lisibilité (voir ICON_MAX_COUNT).
+   */
+  satelliteIcons: boolean;
 }
 
 export const DEFAULT_SETTINGS: DisplaySettings = {
@@ -39,6 +44,7 @@ export const DEFAULT_SETTINGS: DisplaySettings = {
   pointSize: 4,
   zoomBoost: 5,
   selectedScale: 1.6,
+  satelliteIcons: true,
 };
 
 export function useSettings(): [DisplaySettings, (next: DisplaySettings) => void] {

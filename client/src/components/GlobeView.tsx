@@ -12,6 +12,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  BillboardCollection,
   Cartesian2,
   Cartesian3,
   Cartographic,
@@ -23,6 +24,7 @@ import {
   LabelStyle,
   Material,
   Matrix3,
+  Matrix4,
   NearFarScalar,
   OpenStreetMapImageryProvider,
   PointPrimitiveCollection,
@@ -43,7 +45,9 @@ import 'cesium/Build/Cesium/Widgets/widgets.css';
 import type { OrbitBatch, PropagationFrame } from '../hooks/usePropagation';
 import type { DisplaySettings } from '../hooks/useSettings';
 import type { SatelliteRecord } from '../types';
+import { ICON_MAX_COUNT } from '../constants';
 import { colorForCategories } from '../utils/format';
+import { SATELLITE_ICON } from './satelliteIcon';
 
 /** Fonds de carte proposés. */
 export type BaseMapKind = 'satellite' | 'plan' | 'relief';
@@ -63,6 +67,13 @@ interface Props {
   /** Incrémenté pour demander un recentrage caméra sur la sélection. */
   focusNonce: number;
   settings: DisplaySettings;
+  /** Nombre d'objets affichés, qui conditionne le style de marqueur. */
+  visibleCount: number;
+  /**
+   * Facteur d'accélération du temps. Indispensable à l'extrapolation entre deux
+   * trames : celle-ci avance de `Δt réel × facteur` en temps simulé.
+   */
+  timeRate: number;
   /**
    * Conteneur d'accueil des crédits Cesium. En le fournissant, on sort le logo
    * et les attributions du globe pour les afficher dans la barre d'état — les
@@ -79,6 +90,13 @@ const PICK_TOLERANCE = 16;
 
 /** Cadence de rafraîchissement de l'info-bulle de survol (ms). */
 const HOVER_REFRESH_MS = 150;
+
+/**
+ * Rapport entre la taille de base réglée et la taille de l'icône : une icône
+ * doit être sensiblement plus grande qu'un point pour rester lisible, son dessin
+ * n'occupant qu'une partie de son cadre.
+ */
+const ICON_SIZE_FACTOR = 4.5;
 
 /** Distances de référence de la mise à l'échelle des points (mètres). */
 const SCALE_NEAR_M = 3.0e5;
@@ -103,6 +121,8 @@ const icrfScratch = new Matrix3();
 const timeScratch = new JulianDate();
 const speedScratchA = new Cartesian3();
 const speedScratchB = new Cartesian3();
+const orbitMatrixScratch = new Matrix4();
+const moonMatrixScratch = new Matrix4();
 
 /**
  * Mois sidéral : durée d'une révolution complète de la Lune autour de la Terre
@@ -115,8 +135,12 @@ const SIDEREAL_MONTH_DAYS = 27.321661;
 /** Points d'échantillonnage de la trajectoire lunaire. */
 const MOON_PATH_SAMPLES = 240;
 
-/** Intervalles de rafraîchissement de la trajectoire et de l'étiquette lunaires (ms). */
-const MOON_PATH_REFRESH_MS = 5000;
+/**
+ * Intervalles de rafraîchissement de la trajectoire et de l'étiquette lunaires.
+ * La trajectoire n'a plus besoin d'un recalcul rapide depuis qu'elle est tournée
+ * par sa matrice de modèle : une minute suffit à suivre la précession.
+ */
+const MOON_PATH_REFRESH_MS = 60_000;
 const MOON_LABEL_REFRESH_MS = 500;
 
 interface HoverInfo {
@@ -165,19 +189,15 @@ function moonPositionFixed(time: JulianDate): Cartesian3 | undefined {
 }
 
 /**
- * Trajectoire lunaire sur un mois sidéral, dans le repère terrestre.
+ * Trajectoire lunaire sur un mois sidéral, en repère INERTIEL.
  *
- * Comme pour les orbites de satellites, tous les points sont tournés avec la
- * MÊME matrice (celle de l'instant de référence) : on obtient l'ellipse telle
- * qu'elle existe dans l'espace. Sans cela, la rotation de la Terre étalerait la
- * trajectoire en 27 spires.
+ * Comme les orbites de satellites, elle est laissée dans le repère inertiel et
+ * tournée à chaque image par la matrice de modèle de sa polyligne : la
+ * trajectoire reste ainsi collée à la Lune, alors qu'une conversion figée la
+ * décalait à mesure que la Terre tournait. La boucle est refermée sur son
+ * premier point (l'orbite précesse, elle ne se referme pas exactement).
  */
-function moonPathFixed(time: JulianDate): Cartesian3[] {
-  const rotation =
-    Transforms.computeIcrfToFixedMatrix(time, icrfScratch) ??
-    Transforms.computeTemeToPseudoFixedMatrix(time, icrfScratch);
-  if (!defined(rotation)) return [];
-
+function moonPathInertial(time: JulianDate): Cartesian3[] {
   const out: Cartesian3[] = [];
   for (let i = 0; i <= MOON_PATH_SAMPLES; i++) {
     const seconds = (i / MOON_PATH_SAMPLES) * SIDEREAL_MONTH_DAYS * 86_400;
@@ -187,8 +207,9 @@ function moonPathFixed(time: JulianDate): Cartesian3[] {
       new Cartesian3(),
     );
     if (!inertial) return out;
-    out.push(Matrix3.multiplyByVector(rotation, inertial, new Cartesian3()));
+    out.push(inertial);
   }
+  if (out.length > 1) out.push(Cartesian3.clone(out[0], new Cartesian3()));
   return out;
 }
 
@@ -247,12 +268,16 @@ export function GlobeView({
   onSelect,
   focusNonce,
   settings,
+  visibleCount,
+  timeRate,
   creditContainer,
   simNow,
 }: Props): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<Viewer | undefined>(undefined);
   const pointsRef = useRef<PointPrimitiveCollection | undefined>(undefined);
+  /** Marqueurs en forme de satellite, alternative aux points. */
+  const iconsRef = useRef<BillboardCollection | undefined>(undefined);
   const labelsRef = useRef<LabelCollection | undefined>(undefined);
   /** Orbite du satellite suivi (trait net). */
   const trackedOrbitRef = useRef<PolylineCollection | undefined>(undefined);
@@ -271,16 +296,31 @@ export function GlobeView({
   const showLabelRef = useRef(settings.showLabel);
   const moonRef = useRef(settings.moon);
   const moonOrbitRef = useRef(settings.moonOrbit);
+  const timeRateRef = useRef(timeRate);
+  /** Icônes ou points : décidé ici pour être lisible dans la boucle de rendu. */
+  const useIconsRef = useRef(false);
   visibleRef.current = visible;
   selectedRef.current = selectedIndex;
   satellitesRef.current = satellites;
   showLabelRef.current = settings.showLabel;
   moonRef.current = settings.moon;
   moonOrbitRef.current = settings.moonOrbit;
+  timeRateRef.current = timeRate;
+  useIconsRef.current = settings.satelliteIcons && visibleCount <= ICON_MAX_COUNT;
 
   /** Dernière position connue du curseur dans le canvas (undefined = curseur sorti). */
   const cursorRef = useRef<Cartesian2 | undefined>(undefined);
   const [hover, setHover] = useState<HoverInfo | undefined>();
+
+  /**
+   * Collection de marqueurs actuellement alimentée. Seule celle-ci porte des
+   * positions à jour : c'est elle qu'il faut interroger pour le survol, la
+   * position de l'étiquette ou le recentrage caméra.
+   */
+  const activeMarkers = useCallback(
+    () => (useIconsRef.current ? iconsRef.current : pointsRef.current),
+    [],
+  );
 
   /**
    * Recalcule l'info-bulle depuis la dernière position du curseur.
@@ -310,10 +350,10 @@ export function GlobeView({
     }
 
     const frame = frameRef.current;
-    const points = pointsRef.current;
-    if (!frame || !points) return;
+    const markers = activeMarkers();
+    if (!frame || !markers || index >= markers.length) return;
 
-    const position = points.get(index).position;
+    const position = markers.get(index).position;
     const carto = Cartographic.fromCartesian(position);
     const o = index * 3;
 
@@ -329,7 +369,7 @@ export function GlobeView({
       speedKmS:
         Math.hypot(frame.velocities[o], frame.velocities[o + 1], frame.velocities[o + 2]) / 1000,
     });
-  }, [frameRef]);
+  }, [frameRef, activeMarkers]);
 
   /* --------------------------------------------------------------- */
   /* Création du globe (une seule fois)                               */
@@ -363,6 +403,7 @@ export function GlobeView({
     });
 
     const points = viewer.scene.primitives.add(new PointPrimitiveCollection());
+    const icons = viewer.scene.primitives.add(new BillboardCollection());
     const batchOrbits = viewer.scene.primitives.add(new PolylineCollection());
     const moonPath = viewer.scene.primitives.add(new PolylineCollection());
     const trackedOrbit = viewer.scene.primitives.add(new PolylineCollection());
@@ -370,6 +411,7 @@ export function GlobeView({
 
     viewerRef.current = viewer;
     pointsRef.current = points;
+    iconsRef.current = icons;
     labelsRef.current = labels;
     trackedOrbitRef.current = trackedOrbit;
     batchOrbitsRef.current = batchOrbits;
@@ -399,36 +441,68 @@ export function GlobeView({
     /* Boucle de rendu : positions extrapolées puis écrites dans la collection. */
     const onPreUpdate = (): void => {
       const frame = frameRef.current;
-      const collection = pointsRef.current;
+      const points = pointsRef.current;
+      const icons = iconsRef.current;
       const sats = satellitesRef.current;
-      if (!frame || !collection || !sats) return;
+      if (!frame || !points || !icons || !sats) return;
 
       // Éclairage : l'heure de la scène suit l'horloge simulée.
-      viewer.clock.currentTime = JulianDate.fromDate(new Date(simNow()));
+      const time = JulianDate.fromDate(new Date(simNow()));
+      viewer.clock.currentTime = time;
 
-      const dt = (performance.now() - frame.receivedAt) / 1000;
+      /*
+       * Les traces orbitales sont stockées en repère inertiel (TEME) ; on les
+       * fait tourner ici avec la Terre, à chaque image. C'est ce qui garantit
+       * qu'un satellite reste exactement sur sa trace : figer la rotation au
+       * moment du calcul provoquait un décalage croissant de ~0,5 km par seconde
+       * écoulée depuis ce calcul.
+       */
+      const temeRotation = Transforms.computeTemeToPseudoFixedMatrix(time, icrfScratch);
+      if (defined(temeRotation)) {
+        const modelMatrix = Matrix4.fromRotationTranslation(
+          temeRotation,
+          Cartesian3.ZERO,
+          orbitMatrixScratch,
+        );
+        if (trackedOrbitRef.current) trackedOrbitRef.current.modelMatrix = modelMatrix;
+        if (batchOrbitsRef.current) batchOrbitsRef.current.modelMatrix = modelMatrix;
+      }
+
+      // Extrapolation : Δt réel converti en temps simulé par le facteur
+      // d'accélération. Sans ce facteur, en × 60 le marqueur traînait très
+      // loin derrière sa position réelle entre deux trames du worker.
+      const dt = ((performance.now() - frame.receivedAt) / 1000) * timeRateRef.current;
       const mask = visibleRef.current;
       const selected = selectedRef.current;
+      const useIcons = useIconsRef.current;
       const { positions, velocities, valid } = frame;
-      const count = Math.min(collection.length, valid.length);
+      const count = Math.min(points.length, valid.length);
+
+      // Une seule des deux collections est alimentée et visible à la fois.
+      if (points.show === useIcons) points.show = !useIcons;
+      if (icons.show !== useIcons) icons.show = useIcons;
 
       for (let i = 0; i < count; i++) {
-        const point = collection.get(i);
+        const marker = useIcons ? icons.get(i) : points.get(i);
         const shown = valid[i] === 1 && (mask.length === 0 || mask[i] === 1);
 
         if (!shown && i !== selected) {
-          if (point.show) point.show = false;
+          if (marker.show) marker.show = false;
           continue;
         }
 
         const o = i * 3;
-        point.position = new Cartesian3(
+        marker.position = new Cartesian3(
           positions[o] + velocities[o] * dt,
           positions[o + 1] + velocities[o + 1] * dt,
           positions[o + 2] + velocities[o + 2] * dt,
         );
-        if (!point.show) point.show = true;
+        if (!marker.show) marker.show = true;
       }
+
+      // Seule la collection active porte des positions à jour : c'est elle qui
+      // sert de point d'ancrage à l'étiquette (l'autre reste masquée).
+      const markers = useIcons ? icons : points;
 
       // Étiquette du satellite suivi, accrochée à sa position courante.
       const labelCollection = labelsRef.current;
@@ -437,7 +511,7 @@ export function GlobeView({
         const wanted =
           showLabelRef.current && selected !== null && selected < count && valid[selected] === 1;
         if (wanted && selected !== null) {
-          label.position = collection.get(selected).position;
+          label.position = markers.get(selected).position;
           label.text = sats[selected].name;
           label.show = true;
         } else if (label.show) {
@@ -471,25 +545,37 @@ export function GlobeView({
           }
         }
 
-        // La trajectoire est figée dans le repère inertiel au moment du calcul :
-        // elle glisse lentement par rapport au repère terrestre, d'où le
-        // recalcul périodique (même raison que pour les orbites de satellites).
-        if (
-          moonPathCollection &&
-          moonOrbitRef.current &&
-          now - moonTimersRef.current.path > MOON_PATH_REFRESH_MS
-        ) {
-          moonTimersRef.current.path = now;
-          const path = moonPathFixed(time);
-          moonPathCollection.removeAll();
-          if (path.length > 1) {
-            moonPathCollection.add({
-              positions: path,
-              width: 1.4,
-              material: Material.fromType('Color', {
-                color: Color.fromCssColorString('#d9d9d9').withAlpha(0.4),
-              }),
-            });
+        if (moonPathCollection && moonOrbitRef.current) {
+          // La trajectoire est stockée en repère inertiel : la rotation
+          // terrestre est appliquée ici, à chaque image. Le tracé lui-même
+          // n'est donc recalculé que rarement, pour suivre la précession.
+          const icrfRotation =
+            Transforms.computeIcrfToFixedMatrix(time, icrfScratch) ??
+            Transforms.computeTemeToPseudoFixedMatrix(time, icrfScratch);
+          if (defined(icrfRotation)) {
+            moonPathCollection.modelMatrix = Matrix4.fromRotationTranslation(
+              icrfRotation,
+              Cartesian3.ZERO,
+              moonMatrixScratch,
+            );
+          }
+
+          if (
+            moonPathCollection.length === 0 ||
+            now - moonTimersRef.current.path > MOON_PATH_REFRESH_MS
+          ) {
+            moonTimersRef.current.path = now;
+            const path = moonPathInertial(time);
+            moonPathCollection.removeAll();
+            if (path.length > 1) {
+              moonPathCollection.add({
+                positions: path,
+                width: 1.4,
+                material: Material.fromType('Color', {
+                  color: Color.fromCssColorString('#d9d9d9').withAlpha(0.4),
+                }),
+              });
+            }
           }
         } else if (moonPathCollection && !moonOrbitRef.current && moonPathCollection.length > 0) {
           moonPathCollection.removeAll();
@@ -506,6 +592,7 @@ export function GlobeView({
       viewer.destroy();
       viewerRef.current = undefined;
       pointsRef.current = undefined;
+      iconsRef.current = undefined;
       labelsRef.current = undefined;
       trackedOrbitRef.current = undefined;
       batchOrbitsRef.current = undefined;
@@ -532,19 +619,36 @@ export function GlobeView({
   /* --------------------------------------------------------------- */
   useEffect(() => {
     const points = pointsRef.current;
+    const icons = iconsRef.current;
     const labels = labelsRef.current;
-    if (!points || !labels || !satellites) return;
+    if (!points || !icons || !labels || !satellites) return;
 
     points.removeAll();
+    icons.removeAll();
     labels.removeAll();
 
     const scale = scaleByDistance(settings.zoomBoost);
     for (let i = 0; i < satellites.length; i++) {
+      const color = Color.fromCssColorString(colorForCategories(satellites[i].categories));
+
       points.add({
         id: i,
         position: Cartesian3.ZERO,
-        color: Color.fromCssColorString(colorForCategories(satellites[i].categories)),
+        color,
         pixelSize: settings.pointSize,
+        scaleByDistance: scale,
+        show: false,
+      });
+
+      // Icône teintée par la couleur de catégorie : une seule texture blanche
+      // pour toute la collection, donc un seul appel de rendu.
+      icons.add({
+        id: i,
+        position: Cartesian3.ZERO,
+        image: SATELLITE_ICON,
+        color,
+        width: settings.pointSize * ICON_SIZE_FACTOR,
+        height: settings.pointSize * ICON_SIZE_FACTOR,
         scaleByDistance: scale,
         show: false,
       });
@@ -588,17 +692,31 @@ export function GlobeView({
   /* --------------------------------------------------------------- */
   useEffect(() => {
     const points = pointsRef.current;
-    if (!points) return;
+    const icons = iconsRef.current;
+    if (!points || !icons) return;
 
     const scale = scaleByDistance(settings.zoomBoost);
     const selected = selectedIndex;
     for (let i = 0; i < points.length; i++) {
+      const factor = i === selected ? settings.selectedScale : 1;
+
       const point = points.get(i);
-      point.pixelSize =
-        i === selected ? settings.pointSize * settings.selectedScale : settings.pointSize;
+      point.pixelSize = settings.pointSize * factor;
       point.scaleByDistance = scale;
+
+      const icon = icons.get(i);
+      const size = settings.pointSize * ICON_SIZE_FACTOR * factor;
+      icon.width = size;
+      icon.height = size;
+      icon.scaleByDistance = scale;
     }
-  }, [settings.pointSize, settings.zoomBoost, satellites, selectedIndex]);
+  }, [
+    settings.pointSize,
+    settings.zoomBoost,
+    settings.selectedScale,
+    satellites,
+    selectedIndex,
+  ]);
 
   /* --------------------------------------------------------------- */
   /* Mise en évidence de la sélection                                 */
@@ -606,28 +724,33 @@ export function GlobeView({
   const previousSelected = useRef<number | null>(null);
   useEffect(() => {
     const points = pointsRef.current;
-    if (!points || !satellites) return;
+    const icons = iconsRef.current;
+    if (!points || !icons || !satellites) return;
 
     const previous = previousSelected.current;
     if (previous !== null && previous < points.length) {
+      const color = Color.fromCssColorString(colorForCategories(satellites[previous].categories));
       const point = points.get(previous);
-      point.pixelSize = settings.pointSize;
-      point.color = Color.fromCssColorString(colorForCategories(satellites[previous].categories));
+      point.color = color;
       point.outlineWidth = 0;
+      icons.get(previous).color = color;
     }
 
     if (selectedIndex !== null && selectedIndex < points.length) {
-      const point = points.get(selectedIndex);
-      point.pixelSize = settings.pointSize * settings.selectedScale;
-      point.color = Color.WHITE;
-      point.outlineColor = Color.fromCssColorString(
+      const accent = Color.fromCssColorString(
         colorForCategories(satellites[selectedIndex].categories),
       );
+      const point = points.get(selectedIndex);
+      point.color = Color.WHITE;
+      point.outlineColor = accent;
       point.outlineWidth = 3;
+      // L'icône n'a pas de contour : on la passe en blanc pour la détacher,
+      // sa taille étant déjà augmentée par l'effet dédié.
+      icons.get(selectedIndex).color = Color.WHITE;
     }
 
     previousSelected.current = selectedIndex;
-  }, [selectedIndex, satellites, settings.pointSize]);
+  }, [selectedIndex, satellites]);
 
   /* --------------------------------------------------------------- */
   /* Orbite du satellite suivi                                        */
@@ -698,11 +821,11 @@ export function GlobeView({
   /* --------------------------------------------------------------- */
   useEffect(() => {
     const viewer = viewerRef.current;
-    const points = pointsRef.current;
-    if (!viewer || !points || focusNonce === 0 || selectedIndex === null) return;
-    if (selectedIndex >= points.length) return;
+    const markers = activeMarkers();
+    if (!viewer || !markers || focusNonce === 0 || selectedIndex === null) return;
+    if (selectedIndex >= markers.length) return;
 
-    const target = points.get(selectedIndex).position;
+    const target = markers.get(selectedIndex).position;
     if (!target || Cartesian3.magnitude(target) < 1) return;
 
     // On recule le long du vecteur géocentrique pour cadrer l'objet et la Terre.

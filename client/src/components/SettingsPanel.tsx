@@ -1,6 +1,6 @@
 /** Panneau de réglages d'affichage (drawer). */
 import { Alert, Button, Divider, Select, Slider, Switch, Typography } from 'antd';
-import { BASE_MAPS, ORBIT_BATCH_MAX } from '../constants';
+import { BASE_MAPS, ICON_MAX_COUNT, ORBIT_BATCH_MAX } from '../constants';
 import { DEFAULT_SETTINGS } from '../hooks/useSettings';
 import type { DisplaySettings } from '../hooks/useSettings';
 import type { BaseMapKind } from './GlobeView';
@@ -47,6 +47,7 @@ export function SettingsPanel({ settings, onChange, visibleCount }: Props): JSX.
     onChange({ ...settings, [key]: value });
 
   const orbitsCapped = settings.showOrbits && visibleCount > ORBIT_BATCH_MAX;
+  const iconsCapped = settings.satelliteIcons && visibleCount > ICON_MAX_COUNT;
 
   return (
     <div className="settings">
@@ -86,8 +87,25 @@ export function SettingsPanel({ settings, onChange, visibleCount }: Props): JSX.
       />
 
       <Divider orientation="left" plain>
-        Taille des points
+        Marqueurs
       </Divider>
+
+      <Toggle
+        label="Icônes de satellite"
+        hint={`Silhouette de satellite au lieu d'un point, jusqu'à ${nf.format(ICON_MAX_COUNT)} objets affichés`}
+        checked={settings.satelliteIcons}
+        onChange={(v) => set('satelliteIcons', v)}
+      />
+
+      {iconsCapped && (
+        <Alert
+          type="info"
+          showIcon
+          className="setting-alert"
+          message={`${nf.format(visibleCount)} objets affichés : marqueurs repassés en points.`}
+          description={`Au-delà de ${nf.format(ICON_MAX_COUNT)} objets, les icônes se chevauchent et masquent la répartition. Affinez les filtres pour les retrouver.`}
+        />
+      )}
 
       <Text type="secondary">Taille de base : {settings.pointSize} px</Text>
       <Slider

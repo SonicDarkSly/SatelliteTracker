@@ -139,6 +139,8 @@ export default function App(): JSX.Element {
             onSelect={setSelectedIndex}
             focusNonce={focusNonce}
             settings={settings}
+            visibleCount={visibleCount}
+            timeRate={propagation.rate}
             creditContainer={creditRef}
             simNow={propagation.simNow}
           />
