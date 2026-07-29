@@ -1,0 +1,85 @@
+/**
+ * INFRASTRUCTURE — configuration de la source Celestrak.
+ *
+ * Celestrak publie les éléments orbitaux du catalogue public (données issues du
+ * 18ᵉ Space Defense Squadron). Politique d'usage : pas de récupération plus
+ * fréquente que la mise à jour réelle des données (quelques heures) — d'où le
+ * cache serveur et le TTL par défaut de 2 h.
+ */
+
+/** Un groupe de la base GP (« group » de l'API gp.php). */
+export interface CelestrakGroup {
+  /** Valeur du paramètre GROUP=… */
+  readonly id: string;
+  /** Libellé affiché dans les logs et le statut des sources. */
+  readonly label: string;
+}
+
+/**
+ * Groupes récupérés par défaut :
+ *   active         — tout le catalogue des objets actifs (~11 000 objets)
+ *   stations       — ISS, CSS et véhicules amarrés (petit fichier, tag fiable)
+ *   visual         — objets les plus brillants à l'œil nu
+ *   last-30-days   — lancements récents (les plus mal identifiés par le nom)
+ * Surchargeable via CELESTRAK_GROUPS="active,stations,starlink".
+ */
+export const DEFAULT_GROUPS: CelestrakGroup[] = [
+  { id: 'active', label: 'Catalogue actif' },
+  { id: 'stations', label: 'Stations spatiales' },
+  { id: 'visual', label: 'Objets visibles à l’œil nu' },
+  { id: 'last-30-days', label: 'Lancements des 30 derniers jours' },
+];
+
+const GROUP_LABELS: Record<string, string> = {
+  active: 'Catalogue actif',
+  stations: 'Stations spatiales',
+  visual: 'Objets visibles à l’œil nu',
+  'last-30-days': 'Lancements des 30 derniers jours',
+  starlink: 'Starlink',
+  oneweb: 'OneWeb',
+  'gps-ops': 'GPS opérationnels',
+  galileo: 'Galileo',
+  'glo-ops': 'GLONASS opérationnels',
+  beidou: 'BeiDou',
+  'iridium-NEXT': 'Iridium NEXT',
+  weather: 'Météo',
+  noaa: 'NOAA',
+  goes: 'GOES',
+  science: 'Science',
+  geo: 'Géostationnaires',
+  cubesat: 'CubeSats',
+  'cosmos-2251-debris': 'Débris Cosmos 2251',
+};
+
+export function celestrakBaseUrl(): string {
+  return process.env.CELESTRAK_BASE_URL ?? 'https://celestrak.org/NORAD/elements/gp.php';
+}
+
+/** URL d'un groupe au format TLE 3 lignes. */
+export function celestrakGroupUrl(groupId: string): string {
+  return `${celestrakBaseUrl()}?GROUP=${encodeURIComponent(groupId)}&FORMAT=tle`;
+}
+
+/** Groupes configurés (CELESTRAK_GROUPS) ou valeurs par défaut. */
+export function configuredGroups(): CelestrakGroup[] {
+  const raw = process.env.CELESTRAK_GROUPS?.trim();
+  if (!raw) return DEFAULT_GROUPS;
+
+  return raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((id) => ({ id, label: GROUP_LABELS[id] ?? id }));
+}
+
+/** Durée de vie du cache serveur, en millisecondes (CATALOG_TTL_MINUTES, défaut 120). */
+export function catalogTtlMs(): number {
+  const minutes = Number(process.env.CATALOG_TTL_MINUTES ?? 120);
+  return (Number.isFinite(minutes) && minutes > 0 ? minutes : 120) * 60_000;
+}
+
+/** Époque maximale acceptée : au-delà, le TLE est trop vieux pour être précis. */
+export function maxEpochAgeDays(): number {
+  const days = Number(process.env.MAX_EPOCH_AGE_DAYS ?? 30);
+  return Number.isFinite(days) && days > 0 ? days : 30;
+}

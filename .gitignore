@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.log
+server/logs/
+server/data/
+Lancer-perso-macOS.command
+.DS_Store
+.env
+*.tsbuildinfo
+.node/
+.claude/
