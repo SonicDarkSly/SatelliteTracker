@@ -46,7 +46,7 @@ import type { OrbitBatch, PropagationFrame } from '../hooks/usePropagation';
 import type { DisplaySettings } from '../hooks/useSettings';
 import type { SatelliteRecord } from '../types';
 import { colorForCategories } from '../utils/format';
-import { SATELLITE_ICON } from './satelliteIcon';
+import { SATELLITE_ICONS, shapeForSatellite } from './satelliteIcon';
 
 /** Fonds de carte proposés. */
 export type BaseMapKind = 'satellite' | 'plan' | 'relief';
@@ -69,6 +69,10 @@ interface Props {
   onHover: (index: number | null) => void;
   /** Incrémenté pour demander un recentrage caméra sur la sélection. */
   focusNonce: number;
+  /** Incrémenté pour demander un rapprochement de la caméra vers la Lune. */
+  moonFocusNonce: number;
+  /** Incrémenté pour demander le retour à une vue d'ensemble de la Terre. */
+  earthFocusNonce: number;
   settings: DisplaySettings;
   /**
    * Facteur d'accélération du temps. Indispensable à l'extrapolation entre deux
@@ -120,6 +124,9 @@ const EARTH_RADIUS_KM = 6371;
  */
 const MAX_ZOOM_OUT_M = 1.2e9;
 
+/** Vue d'ensemble par défaut : Terre entière, centrée sur l'Europe. */
+const DEFAULT_VIEW = { longitude: 6.14, latitude: 46.2, heightM: 42_000_000 };
+
 /** Tampons réutilisés pour la position de la Lune (évite d'allouer à chaque image). */
 const moonScratch = new Cartesian3();
 const moonFixedScratch = new Cartesian3();
@@ -140,6 +147,12 @@ const SIDEREAL_MONTH_DAYS = 27.321661;
 
 /** Points d'échantillonnage de la trajectoire lunaire. */
 const MOON_PATH_SAMPLES = 240;
+
+/**
+ * Rayon lunaire (m), identique à `Ellipsoid.MOON` utilisé par Cesium pour
+ * dessiner la Lune : elle est donc rendue à sa taille réelle.
+ */
+const MOON_RADIUS_M = 1_737_400;
 
 /**
  * Intervalles de rafraîchissement de la trajectoire et de l'étiquette lunaires.
@@ -275,6 +288,8 @@ export function GlobeView({
   onSelect,
   onHover,
   focusNonce,
+  moonFocusNonce,
+  earthFocusNonce,
   settings,
   timeRate,
   creditContainer,
@@ -434,7 +449,11 @@ export function GlobeView({
     viewer.scene.screenSpaceCameraController.minimumZoomDistance = 50_000;
     viewer.scene.screenSpaceCameraController.maximumZoomDistance = MAX_ZOOM_OUT_M;
     viewer.camera.setView({
-      destination: Cartesian3.fromDegrees(6.14, 46.2, 42_000_000),
+      destination: Cartesian3.fromDegrees(
+        DEFAULT_VIEW.longitude,
+        DEFAULT_VIEW.latitude,
+        DEFAULT_VIEW.heightM,
+      ),
     });
 
     const points = viewer.scene.primitives.add(new PointPrimitiveCollection());
@@ -593,9 +612,16 @@ export function GlobeView({
           if (now - moonTimersRef.current.label > MOON_LABEL_REFRESH_MS) {
             moonTimersRef.current.label = now;
             const km = Math.round(Cartesian3.magnitude(position) / 1000);
+            // Diamètre apparent vu depuis la Terre : ~0,5°, la valeur bien
+            // connue qui explique pourquoi la Lune paraît si petite alors
+            // qu'elle est dessinée à sa taille réelle.
+            const apparentDeg = CesiumMath.toDegrees(
+              2 * Math.atan(MOON_RADIUS_M / Cartesian3.magnitude(position)),
+            );
             moonLabel.text =
               `Lune — ${km.toLocaleString('fr-FR')} km · ` +
-              `${moonSpeedKmS(time).toFixed(3)} km/s`;
+              `${moonSpeedKmS(time).toFixed(3)} km/s · ` +
+              `Ø apparent ${apparentDeg.toFixed(2)}°`;
           }
         }
 
@@ -703,12 +729,13 @@ export function GlobeView({
         show: false,
       });
 
-      // Icône teintée par la couleur de catégorie : une seule texture blanche
-      // pour toute la collection, donc un seul appel de rendu.
+      // Silhouette choisie d'après la famille de l'objet, teintée par la couleur
+      // de sa catégorie. Une douzaine de textures blanches pour tout le
+      // catalogue : Cesium les regroupe dans un seul atlas.
       icons.add({
         id: i,
         position: Cartesian3.ZERO,
-        image: SATELLITE_ICON,
+        image: SATELLITE_ICONS[shapeForSatellite(satellites[i])],
         color,
         width: settings.iconSize,
         height: settings.iconSize,
@@ -940,6 +967,54 @@ export function GlobeView({
       duration: 1.4,
     });
   }, [focusNonce, selectedIndex, markersFor]);
+
+  /* --------------------------------------------------------------- */
+  /* Rapprochement de la caméra vers la Lune                          */
+  /* --------------------------------------------------------------- */
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer || moonFocusNonce === 0) return;
+
+    const moon = moonPositionFixed(viewer.clock.currentTime);
+    if (!moon) return;
+
+    /*
+     * On se place sur la ligne Terre–Lune, un peu en retrait de la Lune, en
+     * regardant vers l'extérieur. À 15 000 km, la Lune occupe une bonne part de
+     * l'écran : c'est le seul moyen de la voir correctement puisqu'elle est
+     * dessinée à sa taille réelle (1 737 km de rayon) et à sa distance réelle.
+     */
+    const direction = Cartesian3.normalize(moon, new Cartesian3());
+    const destination = Cartesian3.multiplyByScalar(
+      direction,
+      Cartesian3.magnitude(moon) - 15_000_000,
+      new Cartesian3(),
+    );
+
+    // Repère de visée : « haut » perpendiculaire à l'axe de vue.
+    const right = Cartesian3.cross(direction, Cartesian3.UNIT_Z, new Cartesian3());
+    const up = Cartesian3.normalize(
+      Cartesian3.cross(right, direction, new Cartesian3()),
+      new Cartesian3(),
+    );
+
+    viewer.camera.flyTo({ destination, orientation: { direction, up }, duration: 3 });
+  }, [moonFocusNonce]);
+
+  /* Retour à la vue d'ensemble de la Terre. */
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer || earthFocusNonce === 0) return;
+
+    viewer.camera.flyTo({
+      destination: Cartesian3.fromDegrees(
+        DEFAULT_VIEW.longitude,
+        DEFAULT_VIEW.latitude,
+        DEFAULT_VIEW.heightM,
+      ),
+      duration: 3,
+    });
+  }, [earthFocusNonce]);
 
   /* Éclairage, atmosphère et Lune */
   useEffect(() => {

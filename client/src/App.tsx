@@ -40,6 +40,8 @@ export default function App(): JSX.Element {
 
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [focusNonce, setFocusNonce] = useState(0);
+  const [moonFocusNonce, setMoonFocusNonce] = useState(0);
+  const [earthFocusNonce, setEarthFocusNonce] = useState(0);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [favorites, setFavorites] = useLocalStorage<string[]>(STORAGE_KEYS.favorites, []);
@@ -177,6 +179,8 @@ export default function App(): JSX.Element {
             onSelect={setSelectedIndex}
             onHover={previewOrbit}
             focusNonce={focusNonce}
+            moonFocusNonce={moonFocusNonce}
+            earthFocusNonce={earthFocusNonce}
             settings={settings}
             timeRate={propagation.rate}
             creditContainer={creditRef}
@@ -312,6 +316,14 @@ export default function App(): JSX.Element {
             settings={settings}
             onChange={setSettings}
             visibleCount={visibleCount}
+            onFocusMoon={() => {
+              setMoonFocusNonce((n) => n + 1);
+              setSettingsOpen(false);
+            }}
+            onFocusEarth={() => {
+              setEarthFocusNonce((n) => n + 1);
+              setSettingsOpen(false);
+            }}
           />
         </Drawer>
       </div>

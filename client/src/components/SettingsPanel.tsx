@@ -1,5 +1,5 @@
 /** Panneau de réglages d'affichage (drawer). */
-import { Alert, Button, Divider, Select, Slider, Switch, Typography } from 'antd';
+import { Alert, Button, Divider, Select, Slider, Space, Switch, Typography } from 'antd';
 import { BASE_MAPS, ORBIT_BATCH_MAX } from '../constants';
 import { DEFAULT_SETTINGS } from '../hooks/useSettings';
 import type { DisplaySettings } from '../hooks/useSettings';
@@ -13,6 +13,10 @@ interface Props {
   onChange: (next: DisplaySettings) => void;
   /** Nombre d'objets passant les filtres, pour signaler le plafond d'orbites. */
   visibleCount: number;
+  /** Amène la caméra à proximité de la Lune. */
+  onFocusMoon: () => void;
+  /** Revient à la vue d'ensemble de la Terre. */
+  onFocusEarth: () => void;
 }
 
 /** Ligne « libellé + interrupteur ». */
@@ -42,7 +46,13 @@ function Toggle({
   );
 }
 
-export function SettingsPanel({ settings, onChange, visibleCount }: Props): JSX.Element {
+export function SettingsPanel({
+  settings,
+  onChange,
+  visibleCount,
+  onFocusMoon,
+  onFocusEarth,
+}: Props): JSX.Element {
   const set = <K extends keyof DisplaySettings>(key: K, value: DisplaySettings[K]): void =>
     onChange({ ...settings, [key]: value });
 
@@ -203,6 +213,26 @@ export function SettingsPanel({ settings, onChange, visibleCount }: Props): JSX.
         checked={settings.moonOrbit}
         onChange={(v) => set('moonOrbit', v)}
       />
+
+      <Divider orientation="left" plain>
+        Point de vue
+      </Divider>
+
+      <Space.Compact block>
+        <Button block onClick={onFocusEarth}>
+          Vue Terre
+        </Button>
+        <Button block onClick={onFocusMoon} disabled={!settings.moon}>
+          Approcher la Lune
+        </Button>
+      </Space.Compact>
+      <Text type="secondary" className="setting-hint">
+        La Lune est dessinée à sa taille réelle : 3 475 km de diamètre, soit 27 % de celui
+        de la Terre, à 384 400 km — l’équivalent de 30 diamètres terrestres. Vue depuis la
+        Terre, elle ne couvre que 0,5° du ciel, d’où son apparence minuscule à l’écran.
+        « Approcher la Lune » amène la caméra à 15 000 km d’elle ; « Vue Terre » revient au
+        cadrage d’ensemble.
+      </Text>
 
       <Divider plain />
       <Button block onClick={() => onChange(DEFAULT_SETTINGS)}>
