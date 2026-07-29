@@ -62,7 +62,11 @@ interface Props {
   orbit: { index: number; positions: Float32Array } | undefined;
   /** Orbites des objets affichés. */
   orbits: OrbitBatch | undefined;
+  /** Orbite de l'objet survolé (aperçu, sans clic). */
+  hoverOrbit: { index: number; positions: Float32Array } | undefined;
   onSelect: (index: number | null) => void;
+  /** Signale l'objet survolé pour que son orbite soit calculée. */
+  onHover: (index: number | null) => void;
   /** Incrémenté pour demander un recentrage caméra sur la sélection. */
   focusNonce: number;
   settings: DisplaySettings;
@@ -267,7 +271,9 @@ export function GlobeView({
   selectedIndex,
   orbit,
   orbits,
+  hoverOrbit,
   onSelect,
+  onHover,
   focusNonce,
   settings,
   timeRate,
@@ -284,6 +290,8 @@ export function GlobeView({
   const trackedOrbitRef = useRef<PolylineCollection | undefined>(undefined);
   /** Orbites de masse (traits fins et translucides). */
   const batchOrbitsRef = useRef<PolylineCollection | undefined>(undefined);
+  /** Orbite de l'objet survolé (aperçu). */
+  const hoverOrbitRef = useRef<PolylineCollection | undefined>(undefined);
   /** Trajectoire lunaire. */
   const moonPathRef = useRef<PolylineCollection | undefined>(undefined);
   /** Horodatages du dernier recalcul lunaire (trajectoire et étiquette). */
@@ -317,6 +325,15 @@ export function GlobeView({
   /** Dernière position connue du curseur dans le canvas (undefined = curseur sorti). */
   const cursorRef = useRef<Cartesian2 | undefined>(undefined);
   const [hover, setHover] = useState<HoverInfo | undefined>();
+
+  /** Dernier objet survolé, pour ne notifier qu'au changement. */
+  const hoveredIndexRef = useRef<number | null>(null);
+  const onHoverRef = useRef(onHover);
+  const hoverOrbitEnabledRef = useRef(settings.hoverOrbit);
+  const hoverTooltipEnabledRef = useRef(settings.hoverTooltip);
+  onHoverRef.current = onHover;
+  hoverOrbitEnabledRef.current = settings.hoverOrbit;
+  hoverTooltipEnabledRef.current = settings.hoverTooltip;
 
   /**
    * Collection portant les positions à jour pour un objet donné.
@@ -353,7 +370,16 @@ export function GlobeView({
 
     viewer.scene.canvas.style.cursor = index === undefined ? '' : 'pointer';
 
-    if (index === undefined || index >= sats.length) {
+    // L'orbite de survol n'est demandée qu'au changement de cible : le pick
+    // tourne plusieurs fois par seconde, en redemander à chaque passage
+    // saturerait le worker pour rien.
+    const target = index !== undefined && index < sats.length ? index : null;
+    if (target !== hoveredIndexRef.current) {
+      hoveredIndexRef.current = target;
+      onHoverRef.current(hoverOrbitEnabledRef.current ? target : null);
+    }
+
+    if (index === undefined || index >= sats.length || !hoverTooltipEnabledRef.current) {
       setHover((h) => (h ? undefined : h));
       return;
     }
@@ -415,6 +441,7 @@ export function GlobeView({
     const icons = viewer.scene.primitives.add(new BillboardCollection());
     const batchOrbits = viewer.scene.primitives.add(new PolylineCollection());
     const moonPath = viewer.scene.primitives.add(new PolylineCollection());
+    const hoverOrbitLine = viewer.scene.primitives.add(new PolylineCollection());
     const trackedOrbit = viewer.scene.primitives.add(new PolylineCollection());
     const labels = viewer.scene.primitives.add(new LabelCollection());
 
@@ -424,6 +451,7 @@ export function GlobeView({
     labelsRef.current = labels;
     trackedOrbitRef.current = trackedOrbit;
     batchOrbitsRef.current = batchOrbits;
+    hoverOrbitRef.current = hoverOrbitLine;
     moonPathRef.current = moonPath;
 
     const handler = new ScreenSpaceEventHandler(viewer.scene.canvas);
@@ -475,6 +503,7 @@ export function GlobeView({
         );
         if (trackedOrbitRef.current) trackedOrbitRef.current.modelMatrix = modelMatrix;
         if (batchOrbitsRef.current) batchOrbitsRef.current.modelMatrix = modelMatrix;
+        if (hoverOrbitRef.current) hoverOrbitRef.current.modelMatrix = modelMatrix;
       }
 
       // Extrapolation : Δt réel converti en temps simulé par le facteur
@@ -621,23 +650,32 @@ export function GlobeView({
       labelsRef.current = undefined;
       trackedOrbitRef.current = undefined;
       batchOrbitsRef.current = undefined;
+      hoverOrbitRef.current = undefined;
       moonPathRef.current = undefined;
     };
     // Volontairement monté une seule fois : les mises à jour passent par les refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* Rafraîchissement de l'info-bulle (le satellite bouge, pas le curseur). */
+  /*
+   * Sondage du curseur : il alimente l'info-bulle ET la trajectoire de survol.
+   * Les deux réglages sont indépendants, la boucle tourne donc dès que l'un des
+   * deux est actif — les coupler ferait disparaître la trajectoire au survol
+   * simplement parce que l'utilisateur a désactivé l'info-bulle.
+   */
   useEffect(() => {
-    if (!settings.hoverTooltip) {
+    const wanted = settings.hoverTooltip || settings.hoverOrbit;
+    if (!wanted) {
       setHover(undefined);
+      hoveredIndexRef.current = null;
+      onHoverRef.current(null);
       const viewer = viewerRef.current;
       if (viewer) viewer.scene.canvas.style.cursor = '';
       return;
     }
     const id = window.setInterval(refreshHover, HOVER_REFRESH_MS);
     return () => window.clearInterval(id);
-  }, [refreshHover, settings.hoverTooltip]);
+  }, [refreshHover, settings.hoverTooltip, settings.hoverOrbit]);
 
   /* --------------------------------------------------------------- */
   /* Peuplement de la collection quand le catalogue change            */
@@ -805,6 +843,41 @@ export function GlobeView({
       }),
     });
   }, [orbit, selectedIndex, satellites]);
+
+  /* --------------------------------------------------------------- */
+  /* Orbite de l'objet survolé                                        */
+  /* --------------------------------------------------------------- */
+  useEffect(() => {
+    const polylines = hoverOrbitRef.current;
+    if (!polylines) return;
+
+    polylines.removeAll();
+    if (!hoverOrbit || !satellites || !settings.hoverOrbit) return;
+    // Inutile de doubler le tracé quand l'objet survolé est déjà sélectionné.
+    if (hoverOrbit.index === selectedIndex) return;
+
+    const positions: Cartesian3[] = [];
+    for (let i = 0; i + 2 < hoverOrbit.positions.length; i += 3) {
+      positions.push(
+        new Cartesian3(
+          hoverOrbit.positions[i],
+          hoverOrbit.positions[i + 1],
+          hoverOrbit.positions[i + 2],
+        ),
+      );
+    }
+    if (positions.length < 2) return;
+
+    polylines.add({
+      positions,
+      width: 1.5,
+      material: Material.fromType('Color', {
+        color: Color.fromCssColorString(
+          colorForCategories(satellites[hoverOrbit.index].categories),
+        ).withAlpha(0.6),
+      }),
+    });
+  }, [hoverOrbit, satellites, selectedIndex, settings.hoverOrbit]);
 
   /* --------------------------------------------------------------- */
   /* Orbites des objets affichés                                      */

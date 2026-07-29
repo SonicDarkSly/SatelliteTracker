@@ -110,6 +110,8 @@ export type WorkerRequest =
   | { type: 'init'; tles: { line1: string; line2: string }[] }
   | { type: 'clock'; simEpochMs: number; rate: number }
   | { type: 'orbit'; index: number }
+  /** Orbite de l'objet survolé, distincte de celle de l'objet suivi. */
+  | { type: 'previewOrbit'; index: number }
   /** Lot d'orbites (objets filtrés), échantillonnage réduit. */
   | { type: 'orbits'; indices: number[] }
   | { type: 'detail'; index: number | null }
@@ -128,9 +130,12 @@ export type WorkerResponse =
       valid: Uint8Array;
     }
   | {
-      type: 'orbit';
+      type: 'orbit' | 'previewOrbit';
       index: number;
-      /** Ellipse orbitale fermée, ECEF en mètres, figée à l'instant de calcul. */
+      /**
+       * Ellipse orbitale en repère inertiel (TEME), en mètres, centrée sur
+       * l'instant du calcul. La rotation terrestre est appliquée au rendu.
+       */
       positions: Float32Array;
     }
   | {

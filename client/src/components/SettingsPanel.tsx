@@ -85,6 +85,13 @@ export function SettingsPanel({ settings, onChange, visibleCount }: Props): JSX.
         onChange={(v) => set('hoverTooltip', v)}
       />
 
+      <Toggle
+        label="Trajectoire au survol"
+        hint="Orbite de l'objet visé, tracée sans avoir à cliquer"
+        checked={settings.hoverOrbit}
+        onChange={(v) => set('hoverOrbit', v)}
+      />
+
       <Divider orientation="left" plain>
         Marqueurs
       </Divider>

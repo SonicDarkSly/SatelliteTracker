@@ -36,6 +36,10 @@ export interface Propagation {
   orbits: OrbitBatch | undefined;
   /** Demande le tracé des orbites de ces objets (tableau vide pour tout effacer). */
   setOrbitTargets: (indices: number[]) => void;
+  /** Orbite de l'objet survolé, indépendante de la sélection. */
+  hoverOrbit: { index: number; positions: Float32Array } | undefined;
+  /** Demande l'orbite de l'objet survolé ; `null` l'effface. */
+  previewOrbit: (index: number | null) => void;
   /** Position géodésique du satellite suivi, rafraîchie à chaque trame. */
   detail: { index: number; state: SatelliteState } | undefined;
   ready: boolean;
@@ -58,11 +62,14 @@ export function usePropagation(satellites: SatelliteRecord[] | undefined): Propa
   const trackedRef = useRef<number | null>(null);
 
   const orbitTargetsRef = useRef<number[]>([]);
+  /** Objet survolé dont l'orbite a été demandée (évite les demandes répétées). */
+  const hoverTargetRef = useRef<number | null>(null);
 
   const [ready, setReady] = useState(false);
   const [propagableCount, setPropagableCount] = useState(0);
   const [orbit, setOrbit] = useState<Propagation['orbit']>();
   const [orbits, setOrbits] = useState<OrbitBatch | undefined>();
+  const [hoverOrbit, setHoverOrbit] = useState<Propagation['hoverOrbit']>();
   const [detail, setDetail] = useState<Propagation['detail']>();
   const [rate, setRateState] = useState(1);
 
@@ -94,6 +101,13 @@ export function usePropagation(satellites: SatelliteRecord[] | undefined): Propa
           break;
         case 'orbit':
           setOrbit({ index: message.index, positions: message.positions });
+          break;
+        case 'previewOrbit':
+          // Le curseur a pu changer de cible pendant le calcul : on écarte les
+          // réponses qui ne correspondent plus à l'objet survolé.
+          if (hoverTargetRef.current === message.index) {
+            setHoverOrbit({ index: message.index, positions: message.positions });
+          }
           break;
         case 'orbits':
           setOrbits({
@@ -165,6 +179,17 @@ export function usePropagation(satellites: SatelliteRecord[] | undefined): Propa
     };
   }, []);
 
+  const previewOrbit = useCallback((index: number | null) => {
+    if (hoverTargetRef.current === index) return;
+    hoverTargetRef.current = index;
+
+    if (index === null) {
+      setHoverOrbit(undefined);
+      return;
+    }
+    workerRef.current?.postMessage({ type: 'previewOrbit', index });
+  }, []);
+
   const setOrbitTargets = useCallback((indices: number[]) => {
     orbitTargetsRef.current = indices;
     if (indices.length === 0) {
@@ -215,6 +240,8 @@ export function usePropagation(satellites: SatelliteRecord[] | undefined): Propa
       orbit,
       orbits,
       setOrbitTargets,
+      hoverOrbit,
+      previewOrbit,
       detail,
       ready,
       propagableCount,
@@ -228,6 +255,8 @@ export function usePropagation(satellites: SatelliteRecord[] | undefined): Propa
       orbit,
       orbits,
       setOrbitTargets,
+      hoverOrbit,
+      previewOrbit,
       detail,
       ready,
       propagableCount,

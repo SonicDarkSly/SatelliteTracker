@@ -18,6 +18,8 @@ export interface DisplaySettings {
   showLabel: boolean;
   /** Info-bulle au survol d'un objet. */
   hoverTooltip: boolean;
+  /** Trajectoire de l'objet survolé, sans avoir à cliquer. */
+  hoverOrbit: boolean;
   baseMap: BaseMapKind;
   /**
    * Trois réglages de taille volontairement indépendants : ils portaient
@@ -44,6 +46,7 @@ export const DEFAULT_SETTINGS: DisplaySettings = {
   moonOrbit: true,
   showLabel: true,
   hoverTooltip: true,
+  hoverOrbit: true,
   baseMap: 'satellite',
   pointSize: 3,
   iconSize: 14,

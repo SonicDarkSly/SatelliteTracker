@@ -162,7 +162,7 @@ function computeFrame(): void {
  * lui. Relier les deux extrémités par un segment, comme je l'avais d'abord fait,
  * produit un artefact bien plus voyant : une corde en travers de l'orbite.
  */
-function computeOrbit(index: number): void {
+function computeOrbit(index: number, type: 'orbit' | 'previewOrbit' = 'orbit'): void {
   const rec = satrecs[index];
   if (!rec || valid[index] === 0) return;
 
@@ -183,7 +183,7 @@ function computeOrbit(index: number): void {
     out[s * 3 + 2] = eci.z * 1000;
   }
 
-  post({ type: 'orbit', index, positions: out }, [out.buffer]);
+  post({ type, index, positions: out }, [out.buffer]);
 }
 
 /**
@@ -258,6 +258,9 @@ self.addEventListener('message', (event: MessageEvent) => {
       break;
     case 'orbit':
       computeOrbit(request.index);
+      break;
+    case 'previewOrbit':
+      computeOrbit(request.index, 'previewOrbit');
       break;
     case 'orbits':
       computeOrbits(request.indices);

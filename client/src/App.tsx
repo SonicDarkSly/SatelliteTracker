@@ -55,7 +55,7 @@ export default function App(): JSX.Element {
    * worker, qui déclenchait un nouveau calcul, qui relançait l'effet… une boucle
    * qui saturait le worker et empêchait les orbites de s'afficher.
    */
-  const { simNow, track, setOrbitTargets } = propagation;
+  const { simNow, track, setOrbitTargets, previewOrbit } = propagation;
 
   // Horloge affichée : rafraîchie deux fois par seconde (indépendante du rendu 60 Hz).
   const [clockMs, setClockMs] = useState(() => Date.now());
@@ -173,7 +173,9 @@ export default function App(): JSX.Element {
             selectedIndex={selectedIndex}
             orbit={propagation.orbit}
             orbits={propagation.orbits}
+            hoverOrbit={propagation.hoverOrbit}
             onSelect={setSelectedIndex}
+            onHover={previewOrbit}
             focusNonce={focusNonce}
             settings={settings}
             timeRate={propagation.rate}
