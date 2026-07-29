@@ -800,8 +800,11 @@ export function GlobeView({
       icon.height = size;
       icon.scaleByDistance = scale;
     }
+    // `iconSize` fait partie des dépendances : l'avoir oublié rendait le curseur
+    // de taille des icônes inopérant jusqu'à ce qu'un autre réglage change.
   }, [
     settings.pointSize,
+    settings.iconSize,
     settings.zoomBoost,
     settings.selectedScale,
     satellites,

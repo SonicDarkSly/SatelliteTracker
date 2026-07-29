@@ -23,6 +23,7 @@ const nf = new Intl.NumberFormat('fr-FR');
 
 /** Ordre d'affichage des silhouettes : du plus notable au plus anecdotique. */
 const SHAPE_ORDER: IconShape[] = [
+  'iss',
   'station',
   'capsule',
   'flat',

@@ -33,7 +33,7 @@ export const FAMILIES: Record<string, SatelliteFamily> = {
     id: 'iss',
     label: 'Station spatiale internationale',
     description:
-      "Laboratoire habité en permanence depuis 2000, en orbite basse vers 400 km d'altitude avec une inclinaison de 51,6°. Elle sert de plateforme de recherche en microgravité (biologie, physique des fluides, science des matériaux) et de banc d'essai pour les vols habités de longue durée. Elle boucle un tour de Terre en environ 92 minutes, soit 16 levers de Soleil par jour.",
+      "Laboratoire habité en permanence depuis 2000, en orbite basse vers 400 km d'altitude avec une inclinaison de 51,6°. Elle sert de plateforme de recherche en microgravité (biologie, physique des fluides, science des matériaux) et de banc d'essai pour les vols habités de longue durée. Elle boucle un tour de Terre en environ 92 minutes, soit 16 levers de Soleil par jour. À noter : le catalogue suit séparément plusieurs de ses modules (Zarya, Unity, Destiny, Zvezda, Nauka) alors qu'ils désignent le même objet physique — d'où plusieurs entrées à la même position. L'entrée de référence est Zarya, n° NORAD 25544.",
     operator: 'NASA, Roscosmos, ESA, JAXA, CSA',
     wikipedia: 'Station spatiale internationale',
   },
@@ -401,8 +401,18 @@ export const FAMILIES: Record<string, SatelliteFamily> = {
  * première correspondance gagne.
  */
 export const FAMILY_RULES: { readonly family: string; readonly pattern: RegExp }[] = [
-  { family: 'iss', pattern: /\b(ISS|ZARYA|UNITY|NAUKA|ZVEZDA)\b/i },
-  { family: 'css', pattern: /\b(CSS|TIANHE|WENTIAN|MENGTIAN)\b/i },
+  /*
+   * « ISS » suivi de OBJECT ou DEB désigne un petit objet largué depuis la station
+   * ou un fragment, pas la station elle-même : le catalogue en contient plusieurs
+   * (ISS OBJECT YJ à YN). Sans cette exclusion, ils s'affichaient avec la
+   * silhouette d'une station habitée.
+   */
+  {
+    family: 'iss',
+    pattern:
+      /\bISS\b(?!\s+(?:OBJECT|DEB))|\b(ZARYA|UNITY|NAUKA|ZVEZDA|DESTINY|HARMONY|TRANQUILITY|COLUMBUS|KIBO|QUEST|POISK|RASSVET)\b/i,
+  },
+  { family: 'css', pattern: /\bCSS\b(?!\s+(?:OBJECT|DEB))|\b(TIANHE|WENTIAN|MENGTIAN)\b/i },
   {
     family: 'cargo',
     pattern: /\b(PROGRESS|CYGNUS|DRAGON|TIANZHOU|SOYUZ-MS|HTV|CREW)\b/i,

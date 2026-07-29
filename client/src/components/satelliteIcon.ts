@@ -20,6 +20,7 @@ import type { SatelliteRecord } from '../types';
 
 /** Silhouettes disponibles. */
 export type IconShape =
+  | 'iss'
   | 'station'
   | 'capsule'
   | 'flat'
@@ -99,16 +100,49 @@ function dish(ctx: CanvasRenderingContext2D, cx: number, cy: number, rx: number)
 /* Silhouettes                                                         */
 /* ------------------------------------------------------------------ */
 
-/** Station spatiale : longue poutre et plusieurs paires de panneaux (ISS). */
+/**
+ * Station spatiale internationale : longue poutre intégrée portant quatre paires
+ * de panneaux solaires, radiateurs perpendiculaires, grappe de modules
+ * pressurisés au centre. C'est la silhouette la plus reconnaissable du ciel, et
+ * l'objet le plus visible à l'œil nu — elle mérite son propre marqueur.
+ */
+function drawIss(ctx: CanvasRenderingContext2D): void {
+  ctx.fillRect(3, C - 1.5, 58, 3); // poutre principale (treillis intégré)
+
+  // Quatre paires de panneaux solaires, les externes plus grandes.
+  panel(ctx, 3, C - 14, 12, 11);
+  panel(ctx, 3, C + 3, 12, 11);
+  panel(ctx, 16, C - 12, 10, 9);
+  panel(ctx, 16, C + 3, 10, 9);
+  panel(ctx, 38, C - 12, 10, 9);
+  panel(ctx, 38, C + 3, 10, 9);
+  panel(ctx, 49, C - 14, 12, 11);
+  panel(ctx, 49, C + 3, 12, 11);
+
+  // Radiateurs thermiques, perpendiculaires aux panneaux.
+  ctx.fillRect(C - 14, C - 6, 3, 12);
+  ctx.fillRect(C + 11, C - 6, 3, 12);
+
+  // Modules pressurisés : segment russe et américain, plus un module latéral.
+  rr(ctx, C - 4, C - 11, 8, 24, 2.5);
+  rr(ctx, C - 9, C - 3, 18, 7, 2);
+}
+
+/**
+ * Station chinoise Tiangong : architecture en T, module central Tianhe et deux
+ * laboratoires latéraux, une paire de panneaux chacun.
+ */
 function drawStation(ctx: CanvasRenderingContext2D): void {
-  ctx.fillRect(6, C - 1.5, 52, 3); // poutre principale
-  rr(ctx, C - 5, C - 8, 10, 16, 2); // modules pressurisés
-  panel(ctx, 6, C - 13, 13, 10);
-  panel(ctx, 6, C + 3, 13, 10);
-  panel(ctx, 45, C - 13, 13, 10);
-  panel(ctx, 45, C + 3, 13, 10);
-  rr(ctx, C - 12, C - 4, 6, 8, 1.5); // modules latéraux
-  rr(ctx, C + 6, C - 4, 6, 8, 1.5);
+  rr(ctx, C - 4, C - 14, 8, 30, 3); // module central
+  rr(ctx, C - 16, C - 6, 32, 9, 3); // laboratoires latéraux
+  panel(ctx, 4, C - 16, 13, 9);
+  panel(ctx, 4, C + 6, 13, 9);
+  panel(ctx, 47, C - 16, 13, 9);
+  panel(ctx, 47, C + 6, 13, 9);
+  ctx.fillRect(17, C - 12, 2, 7); // mâts des panneaux
+  ctx.fillRect(45, C - 12, 2, 7);
+  ctx.fillRect(17, C + 5, 2, 7);
+  ctx.fillRect(45, C + 5, 2, 7);
 }
 
 /** Vaisseau de ravitaillement : nez conique, corps cylindrique, deux panneaux. */
@@ -251,6 +285,7 @@ function drawDefault(ctx: CanvasRenderingContext2D): void {
 }
 
 const PAINTERS: Record<IconShape, (ctx: CanvasRenderingContext2D) => void> = {
+  iss: drawIss,
   station: drawStation,
   capsule: drawCapsule,
   flat: drawFlat,
@@ -352,7 +387,8 @@ function render(shape: IconShape): string {
 
 /** Libellés FR des silhouettes, pour la légende. */
 export const SHAPE_LABELS: Record<IconShape, string> = {
-  station: 'Station spatiale habitée',
+  iss: 'Station spatiale internationale',
+  station: 'Station spatiale chinoise',
   capsule: 'Vaisseau de ravitaillement',
   flat: 'Constellation en orbite basse',
   nav: 'Navigation par satellite',
@@ -376,7 +412,7 @@ export const SATELLITE_ICONS: Record<IconShape, string> = Object.fromEntries(
 /* ------------------------------------------------------------------ */
 
 const SHAPE_BY_FAMILY: Record<string, IconShape> = {
-  iss: 'station',
+  iss: 'iss',
   css: 'station',
   cargo: 'capsule',
 

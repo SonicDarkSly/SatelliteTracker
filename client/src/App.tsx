@@ -143,7 +143,15 @@ export default function App(): JSX.Element {
     if (filters.owners.length > 0) n++;
     if (filters.maxAltitudeKm > 0) n++;
     return n;
-  }, [filters]);
+    // `filters` est reconstruit à chaque rendu (fusion avec les valeurs par
+    // défaut) : dépendre de l'objet entier ne mémoïserait rien. On dépend donc
+    // de ses champs, ce qui garantit aussi le recalcul à chaque changement réel.
+  }, [
+    filters.hiddenCategories,
+    filters.hiddenRegimes,
+    filters.owners,
+    filters.maxAltitudeKm,
+  ]);
 
   return (
     <ConfigProvider
