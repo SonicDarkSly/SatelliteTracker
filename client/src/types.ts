@@ -28,6 +28,8 @@ export interface SatelliteRecord {
   rcsMeters2?: number;
   /** Identifiant de famille ; la description est dans `CatalogSnapshot.families`. */
   family?: string;
+  /** Autres entrées du catalogue désignant le même objet physique (modules de station). */
+  mergedModules?: { noradId: string; name: string }[];
 }
 
 /** Famille d'objets (constellation, programme, série) et son rôle. */

@@ -72,6 +72,13 @@ export interface SatelliteRecord {
    * plutôt que recopiée sur chaque enregistrement.
    */
   readonly family?: string;
+
+  /**
+   * Autres entrées du catalogue désignant le même objet physique — les modules
+   * d'une station assemblée en orbite, chacun catalogué séparément parce que
+   * lancé séparément.
+   */
+  readonly mergedModules?: { readonly noradId: string; readonly name: string }[];
 }
 
 /** Nature de l'objet catalogué (champ OBJECT_TYPE du SATCAT). */

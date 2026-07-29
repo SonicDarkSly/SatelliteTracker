@@ -162,7 +162,20 @@ export function SatelliteDetails({
             {satellite.rcsMeters2.toFixed(2)} m²
           </Descriptions.Item>
         )}
+        {satellite.mergedModules && satellite.mergedModules.length > 0 && (
+          <Descriptions.Item label="Modules regroupés">
+            {satellite.mergedModules.map((m) => `${m.name} (${m.noradId})`).join(', ')}
+          </Descriptions.Item>
+        )}
       </Descriptions>
+
+      {satellite.mergedModules && satellite.mergedModules.length > 0 && (
+        <Text type="secondary" className="details-merge-note">
+          Le catalogue attribue un numéro à chaque module lancé. Ces entrées désignent le
+          même objet physique, assemblé en orbite : elles sont regroupées ici sous la
+          désignation du module de base.
+        </Text>
+      )}
 
       <details className="tle-block">
         <summary>

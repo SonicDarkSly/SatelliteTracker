@@ -407,10 +407,17 @@ export const FAMILY_RULES: { readonly family: string; readonly pattern: RegExp }
    * (ISS OBJECT YJ à YN). Sans cette exclusion, ils s'affichaient avec la
    * silhouette d'une station habitée.
    */
+  /*
+   * Motif volontairement étroit. Les modules de l'ISS sont catalogués « ISS (X) »,
+   * le préfixe suffit donc, et n'ajouter que des noms sans ambiguïté évite les
+   * faux positifs : en listant les noms de modules courants, RASSVET-3 — une
+   * constellation russe de 16 satellites à 512 km — s'est retrouvée classée comme
+   * module de la station. Seuls les modules russes catalogués sous leur seul nom
+   * sont donc énumérés.
+   */
   {
     family: 'iss',
-    pattern:
-      /\bISS\b(?!\s+(?:OBJECT|DEB))|\b(ZARYA|UNITY|NAUKA|ZVEZDA|DESTINY|HARMONY|TRANQUILITY|COLUMBUS|KIBO|QUEST|POISK|RASSVET)\b/i,
+    pattern: /\bISS\b(?!\s+(?:OBJECT|DEB))|\b(ZARYA|ZVEZDA|NAUKA|POISK|PRICHAL)\b/i,
   },
   { family: 'css', pattern: /\bCSS\b(?!\s+(?:OBJECT|DEB))|\b(TIANHE|WENTIAN|MENGTIAN)\b/i },
   {

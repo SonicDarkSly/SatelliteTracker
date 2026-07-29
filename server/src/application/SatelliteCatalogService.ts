@@ -16,6 +16,7 @@ import type {
 import type { CatalogSnapshot, SatelliteRecord, SourceStatus } from '../domain/model/types.js';
 import { ownerInfo } from '../domain/model/owners.js';
 import { identifyFamily } from '../domain/services/identifyFamily.js';
+import { mergeStationModules } from '../domain/services/mergeStationModules.js';
 import {
   countCategories,
   countOwners,
@@ -196,7 +197,9 @@ export class SatelliteCatalogService {
       this.logger.error('Sources injoignables et aucun cache disponible.');
     }
 
-    const satellites = await this.enrich(merged, warnings);
+    // L'enrichissement calcule la famille, dont dépend le regroupement des
+    // modules de station : l'ordre des deux étapes compte.
+    const satellites = mergeStationModules(await this.enrich(merged, warnings));
 
     const now = new Date().toISOString();
     const snapshot: CatalogSnapshot = {
