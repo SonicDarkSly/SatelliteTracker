@@ -6,6 +6,8 @@
  */
 import type { CategoryId, FacetCount, SatelliteRecord } from '../model/types.js';
 import { CATEGORY_LABELS, REGIME_LABELS } from '../model/types.js';
+import type { SatelliteFamily } from '../model/families.js';
+import { FAMILIES } from '../model/families.js';
 
 export function mergeSatellites(lots: SatelliteRecord[][]): SatelliteRecord[] {
   const byNorad = new Map<string, SatelliteRecord>();
@@ -66,6 +68,27 @@ export function countOwners(satellites: SatelliteRecord[]): FacetCount[] {
   return [...counts.entries()]
     .map(([id, { label, count }]) => ({ id, label, count }))
     .sort((a, b) => b.count - a.count);
+}
+
+/**
+ * Descriptions des seules familles présentes dans le catalogue, avec le nombre
+ * d'objets rattachés. Envoyer le dictionnaire complet coûterait peu, mais le
+ * limiter aux familles utilisées évite d'afficher des filtres vides.
+ */
+export function usedFamilies(
+  satellites: SatelliteRecord[],
+): Record<string, SatelliteFamily & { count: number }> {
+  const counts = new Map<string, number>();
+  for (const sat of satellites) {
+    if (sat.family) counts.set(sat.family, (counts.get(sat.family) ?? 0) + 1);
+  }
+
+  const out: Record<string, SatelliteFamily & { count: number }> = {};
+  for (const [id, count] of counts) {
+    const family = FAMILIES[id];
+    if (family) out[id] = { ...family, count };
+  }
+  return out;
 }
 
 /** Comptages par régime orbital, dans l'ordre LEO → MEO → GEO → HEO. */

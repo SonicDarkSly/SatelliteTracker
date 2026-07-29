@@ -5,3 +5,4 @@
 export const TLE_SOURCES = Symbol('TLE_SOURCES');
 export const METADATA_SOURCE = Symbol('METADATA_SOURCE');
 export const CATALOG_CACHE_PORT = Symbol('CATALOG_CACHE_PORT');
+export const ENCYCLOPEDIA_PORT = Symbol('ENCYCLOPEDIA_PORT');

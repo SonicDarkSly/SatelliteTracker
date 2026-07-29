@@ -594,7 +594,8 @@ export function GlobeView({
     const selected = selectedIndex;
     for (let i = 0; i < points.length; i++) {
       const point = points.get(i);
-      point.pixelSize = i === selected ? settings.pointSize * 2.5 : settings.pointSize;
+      point.pixelSize =
+        i === selected ? settings.pointSize * settings.selectedScale : settings.pointSize;
       point.scaleByDistance = scale;
     }
   }, [settings.pointSize, settings.zoomBoost, satellites, selectedIndex]);
@@ -617,7 +618,7 @@ export function GlobeView({
 
     if (selectedIndex !== null && selectedIndex < points.length) {
       const point = points.get(selectedIndex);
-      point.pixelSize = settings.pointSize * 2.5;
+      point.pixelSize = settings.pointSize * settings.selectedScale;
       point.color = Color.WHITE;
       point.outlineColor = Color.fromCssColorString(
         colorForCategories(satellites[selectedIndex].categories),

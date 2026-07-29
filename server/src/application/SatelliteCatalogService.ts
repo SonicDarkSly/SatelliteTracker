@@ -15,11 +15,13 @@ import type {
 } from '../domain/ports/SatelliteMetadataPort.js';
 import type { CatalogSnapshot, SatelliteRecord, SourceStatus } from '../domain/model/types.js';
 import { ownerInfo } from '../domain/model/owners.js';
+import { identifyFamily } from '../domain/services/identifyFamily.js';
 import {
   countCategories,
   countOwners,
   countRegimes,
   mergeSatellites,
+  usedFamilies,
 } from '../domain/services/mergeCatalogs.js';
 import { catalogTtlMs } from '../infrastructure/config/celestrak.js';
 import { politePause } from '../infrastructure/http/fetch.js';
@@ -174,6 +176,7 @@ export class SatelliteCatalogService {
       categories: countCategories(satellites),
       regimes: countRegimes(satellites),
       owners: countOwners(satellites),
+      families: usedFamilies(satellites),
       sources: statuses,
       warnings,
     };
@@ -207,7 +210,15 @@ export class SatelliteCatalogService {
     warnings: string[],
   ): Promise<SatelliteRecord[]> {
     const table = await this.loadMetadata(warnings);
-    if (!table || table.size === 0) return satellites;
+
+    // Sans registre, on rattache quand même chaque objet à une famille : le nom
+    // et le régime orbital suffisent dans la plupart des cas.
+    if (!table || table.size === 0) {
+      return satellites.map((sat) => ({
+        ...sat,
+        family: identifyFamily(sat.name, sat.categories, sat.regime, undefined),
+      }));
+    }
 
     let matched = 0;
     const enriched = satellites.map((sat) => {
@@ -226,6 +237,9 @@ export class SatelliteCatalogService {
         launchDate: meta.launchDate,
         launchSite: meta.launchSite,
         rcsMeters2: meta.rcsMeters2,
+        // La nature issue du registre affine le rattachement : un étage de
+        // lanceur mal nommé serait sinon classé d'après sa mission d'origine.
+        family: identifyFamily(sat.name, sat.categories, sat.regime, meta.objectType),
       };
     });
 

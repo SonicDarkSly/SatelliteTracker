@@ -23,6 +23,8 @@ export interface DisplaySettings {
   pointSize: number;
   /** Facteur de grossissement en vue rapprochée. */
   zoomBoost: number;
+  /** Facteur de taille du point sélectionné, relatif à la taille de base. */
+  selectedScale: number;
 }
 
 export const DEFAULT_SETTINGS: DisplaySettings = {
@@ -36,6 +38,7 @@ export const DEFAULT_SETTINGS: DisplaySettings = {
   baseMap: 'satellite',
   pointSize: 4,
   zoomBoost: 5,
+  selectedScale: 1.6,
 };
 
 export function useSettings(): [DisplaySettings, (next: DisplaySettings) => void] {

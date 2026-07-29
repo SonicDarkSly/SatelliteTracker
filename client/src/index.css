@@ -219,6 +219,40 @@ body {
   margin: 8px 0;
 }
 
+.details-role,
+.details-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 10px 0;
+  padding: 9px 11px;
+  background: rgba(255, 255, 255, 0.035);
+  border-left: 2px solid rgba(64, 169, 255, 0.55);
+  border-radius: 0 6px 6px 0;
+}
+
+.details-notice {
+  border-left-color: rgba(255, 255, 255, 0.22);
+}
+
+.details-role-title {
+  font-size: 13px;
+}
+
+.details-role-operator {
+  font-size: 11px;
+}
+
+.details-role-text {
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.details-notice-source {
+  font-size: 11px;
+  margin-top: 2px;
+}
+
 /* -------------------------------- réglages ------------------------------- */
 
 .settings .setting-row {

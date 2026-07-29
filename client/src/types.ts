@@ -26,6 +26,31 @@ export interface SatelliteRecord {
   launchDate?: string;
   launchSite?: string;
   rcsMeters2?: number;
+  /** Identifiant de famille ; la description est dans `CatalogSnapshot.families`. */
+  family?: string;
+}
+
+/** Famille d'objets (constellation, programme, série) et son rôle. */
+export interface SatelliteFamily {
+  id: string;
+  label: string;
+  description: string;
+  operator?: string;
+  wikipedia?: string;
+  count: number;
+}
+
+/** Réponse de /api/satellites/:noradId/description */
+export interface SatelliteDescription {
+  noradId: string;
+  name: string;
+  family?: Omit<SatelliteFamily, 'count'>;
+  notice?: {
+    title: string;
+    extract: string;
+    url: string;
+    attribution: string;
+  };
 }
 
 /** Libellés FR des natures d'objet du SATCAT. */
@@ -59,6 +84,8 @@ export interface CatalogSnapshot {
   categories: FacetCount[];
   regimes: FacetCount[];
   owners: FacetCount[];
+  /** Descriptions des familles présentes, indexées par identifiant. */
+  families: Record<string, SatelliteFamily>;
   sources: SourceStatus[];
   warnings: string[];
 }

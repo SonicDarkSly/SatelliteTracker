@@ -184,6 +184,7 @@ export default function App(): JSX.Element {
                 state={
                   propagation.detail?.index === selectedIndex ? propagation.detail.state : undefined
                 }
+                family={selected.family ? snapshot?.families?.[selected.family] : undefined}
                 favorite={favorites.includes(selected.noradId)}
                 onToggleFavorite={toggleFavorite}
                 onFocus={() => setFocusNonce((n) => n + 1)}

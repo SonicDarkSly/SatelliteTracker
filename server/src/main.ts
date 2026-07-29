@@ -20,6 +20,7 @@ import compression from 'compression';
 import { AppModule } from './app.module.js';
 import { loadEnv } from './infrastructure/config/loadEnv.js';
 import { catalogTtlMs, configuredGroups, maxEpochAgeDays } from './infrastructure/config/celestrak.js';
+import { localTleFiles, tleDir } from './infrastructure/sources/FileTleSource.js';
 import { SatelliteCatalogService } from './application/SatelliteCatalogService.js';
 
 /** Date + heure locales, format FR : 29/07/2026 14:32:10 */
@@ -119,6 +120,12 @@ async function bootstrap(): Promise<void> {
   const groups = configuredGroups();
   config.log(`✅ Serveur NestJS démarré : http://localhost:${port}/api/satellites`);
   config.log(`source : Celestrak · groupes : ${groups.map((g) => g.id).join(', ')}`);
+  const localFiles = localTleFiles();
+  config.log(
+    localFiles.length > 0
+      ? `fichiers TLE locaux : ${localFiles.length} détecté(s) dans ${tleDir()} — fusionnés avec Celestrak`
+      : `fichiers TLE locaux : aucun (déposer un .tle dans ${tleDir()} pour travailler hors ligne)`,
+  );
   config.log(`cache : ${catalogTtlMs() / 60_000} min · TLE écartés au-delà de ${maxEpochAgeDays()} jours`);
   config.log('propagation SGP4 : côté client (WebWorker) — aucun calcul de position côté serveur');
 

@@ -1,4 +1,5 @@
 /** DOMAINE — modèle métier du suivi de satellites. */
+import type { SatelliteFamily } from './families.js';
 
 /** Identifiant catalogue NORAD (5 chiffres, conservé en texte pour l'affichage). */
 export type NoradId = string;
@@ -64,6 +65,13 @@ export interface SatelliteRecord {
   readonly launchSite?: string;
   /** Surface équivalente radar en m² (LARGE/MEDIUM/SMALL converti, ou valeur brute). */
   readonly rcsMeters2?: number;
+
+  /**
+   * Identifiant de famille (constellation, programme, série). La description
+   * correspondante est fournie une seule fois dans `CatalogSnapshot.families`
+   * plutôt que recopiée sur chaque enregistrement.
+   */
+  readonly family?: string;
 }
 
 /** Nature de l'objet catalogué (champ OBJECT_TYPE du SATCAT). */
@@ -107,6 +115,8 @@ export interface CatalogSnapshot {
   readonly regimes: FacetCount[];
   /** Comptage par propriétaire (pays / agence / opérateur), effectif décroissant. */
   readonly owners: FacetCount[];
+  /** Descriptions des familles présentes dans cet instantané, indexées par identifiant. */
+  readonly families: Record<string, SatelliteFamily & { count: number }>;
   readonly sources: SourceStatus[];
   readonly warnings: string[];
 }

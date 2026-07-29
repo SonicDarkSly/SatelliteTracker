@@ -1,9 +1,10 @@
 /** Fiche du satellite sélectionné : éléments orbitaux et position instantanée. */
 import { AimOutlined, CloseOutlined, StarFilled, StarOutlined } from '@ant-design/icons';
-import { Alert, Button, Descriptions, Space, Tag, Tooltip, Typography } from 'antd';
+import { Alert, Button, Descriptions, Skeleton, Space, Tag, Tooltip, Typography } from 'antd';
 import { CATEGORY_COLORS } from '../constants';
+import { useDescription } from '../hooks/useDescription';
 import { OBJECT_TYPE_LABELS } from '../types';
-import type { SatelliteRecord, SatelliteState } from '../types';
+import type { SatelliteFamily, SatelliteRecord, SatelliteState } from '../types';
 import {
   epochAgeDays,
   formatDateTime,
@@ -15,9 +16,13 @@ import {
 
 const { Text, Title } = Typography;
 
+const { Link } = Typography;
+
 interface Props {
   satellite: SatelliteRecord;
   state: SatelliteState | undefined;
+  /** Famille rattachée, issue de l'instantané (disponible immédiatement). */
+  family: SatelliteFamily | undefined;
   favorite: boolean;
   onToggleFavorite: () => void;
   onFocus: () => void;
@@ -27,12 +32,15 @@ interface Props {
 export function SatelliteDetails({
   satellite,
   state,
+  family,
   favorite,
   onToggleFavorite,
   onFocus,
   onClose,
 }: Props): JSX.Element {
   const age = epochAgeDays(satellite.epoch);
+  const { description, loading } = useDescription(satellite.noradId);
+  const notice = description?.notice;
 
   return (
     <div className="panel details-panel">
@@ -76,6 +84,35 @@ export function SatelliteDetails({
           <Tag bordered={false}>{OBJECT_TYPE_LABELS[satellite.objectType]}</Tag>
         )}
       </Space>
+
+      {family && (
+        <section className="details-role">
+          <Text strong className="details-role-title">
+            {family.label}
+          </Text>
+          {family.operator && (
+            <Text type="secondary" className="details-role-operator">
+              {family.operator}
+            </Text>
+          )}
+          <Text className="details-role-text">{family.description}</Text>
+        </section>
+      )}
+
+      {/* Notice encyclopédique : chargée à la sélection, absente pour la
+          plupart des objets (débris, séries sans article dédié). */}
+      {loading && !notice && <Skeleton active paragraph={{ rows: 2 }} title={false} />}
+      {notice && (
+        <section className="details-notice">
+          <Text className="details-role-text">{notice.extract}</Text>
+          <Text type="secondary" className="details-notice-source">
+            <Link href={notice.url} target="_blank" rel="noreferrer">
+              {notice.title}
+            </Link>{' '}
+            — {notice.attribution}
+          </Text>
+        </section>
+      )}
 
       {age > 14 && (
         <Alert

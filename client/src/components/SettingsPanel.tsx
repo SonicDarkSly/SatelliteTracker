@@ -109,9 +109,23 @@ export function SettingsPanel({ settings, onChange, visibleCount }: Props): JSX.
         onChange={(v) => set('zoomBoost', v)}
         tooltip={{ formatter: (v) => `× ${v}` }}
       />
+      <Text type="secondary">
+        Point sélectionné : × {settings.selectedScale.toFixed(1)} (
+        {(settings.pointSize * settings.selectedScale).toFixed(1)} px)
+      </Text>
+      <Slider
+        min={1}
+        max={4}
+        step={0.1}
+        value={settings.selectedScale}
+        onChange={(v) => set('selectedScale', v)}
+        tooltip={{ formatter: (v) => `× ${v}` }}
+      />
+
       <Text type="secondary" className="setting-hint">
         Les points grossissent quand la caméra s'approche et se réduisent au loin. Augmentez
-        ces valeurs si les objets sont difficiles à viser.
+        ces valeurs si les objets sont difficiles à viser, réduisez-les si le point
+        sélectionné masque son environnement.
       </Text>
 
       <Divider orientation="left" plain>

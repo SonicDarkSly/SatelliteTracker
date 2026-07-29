@@ -4,8 +4,16 @@
  */
 import { Module } from '@nestjs/common';
 import { CqrsModule } from '@nestjs/cqrs';
-import { CATALOG_CACHE_PORT, METADATA_SOURCE, TLE_SOURCES } from './app.tokens.js';
+import {
+  CATALOG_CACHE_PORT,
+  ENCYCLOPEDIA_PORT,
+  METADATA_SOURCE,
+  TLE_SOURCES,
+} from './app.tokens.js';
+import { WikipediaFrAdapter } from './infrastructure/encyclopedia/WikipediaFrAdapter.js';
+import { GetDescriptionQueryHandler } from './application/queries/GetDescriptionQuery.js';
 import { CelestrakSource } from './infrastructure/sources/CelestrakSource.js';
+import { FileTleSource, localTleFiles, tleDir } from './infrastructure/sources/FileTleSource.js';
 import { CachedMetadataSource } from './infrastructure/sources/CachedMetadataSource.js';
 import { FileCatalogCache } from './infrastructure/cache/FileCatalogCache.js';
 import { configuredGroups } from './infrastructure/config/celestrak.js';
@@ -22,17 +30,24 @@ import { SatellitesController } from './interface/http/satellites.controller.js'
   providers: [
     {
       provide: TLE_SOURCES,
-      useFactory: () => configuredGroups().map((g) => new CelestrakSource(g.id, g.label)),
+      useFactory: () => [
+        // Source locale enregistrée seulement si des fichiers sont présents :
+        // sinon elle produirait un avertissement permanent sans intérêt.
+        ...(localTleFiles().length > 0 ? [new FileTleSource()] : []),
+        ...configuredGroups().map((g) => new CelestrakSource(g.id, g.label)),
+      ],
     },
     // Adapters de cache sur disque : le catalogue et le registre survivent aux
     // redémarrages, ce qui évite de retélécharger chez Celestrak (et donc de se
     // faire limiter). L'adapter mémoire reste disponible pour les tests.
     { provide: METADATA_SOURCE, useClass: CachedMetadataSource },
     { provide: CATALOG_CACHE_PORT, useClass: FileCatalogCache },
+    { provide: ENCYCLOPEDIA_PORT, useClass: WikipediaFrAdapter },
     SatelliteCatalogService,
     GetCatalogQueryHandler,
     GetFacetsQueryHandler,
     GetSatelliteQueryHandler,
+    GetDescriptionQueryHandler,
     RefreshCatalogCommandHandler,
   ],
 })
