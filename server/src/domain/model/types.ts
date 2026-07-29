@@ -46,7 +46,36 @@ export interface SatelliteRecord {
   readonly altitudeKm: number;
   readonly regime: OrbitRegime;
   readonly categories: CategoryId[];
+
+  /* Champs issus du SATCAT (absents si le SATCAT n'a pas pu être récupéré). */
+  /** Code propriétaire Celestrak (US, CIS, PRC, ESA, ITSO…). */
+  readonly owner?: string;
+  /** Libellé FR du propriétaire. */
+  readonly ownerLabel?: string;
+  /** Drapeau émoji si un pays unique est identifiable. */
+  readonly ownerFlag?: string;
+  /** Nature du propriétaire : état, agence, organisation, opérateur. */
+  readonly ownerKind?: string;
+  /** Nature de l'objet d'après le SATCAT. */
+  readonly objectType?: ObjectType;
+  /** Date de lancement (ISO, jour seul). */
+  readonly launchDate?: string;
+  /** Code du site de lancement (TYMSC, AFETR, KOUR…). */
+  readonly launchSite?: string;
+  /** Surface équivalente radar en m² (LARGE/MEDIUM/SMALL converti, ou valeur brute). */
+  readonly rcsMeters2?: number;
 }
+
+/** Nature de l'objet catalogué (champ OBJECT_TYPE du SATCAT). */
+export type ObjectType = 'PAY' | 'R/B' | 'DEB' | 'UNK';
+
+/** Libellés FR des natures d'objet. */
+export const OBJECT_TYPE_LABELS: Record<ObjectType, string> = {
+  PAY: 'Charge utile',
+  'R/B': 'Étage de lanceur',
+  DEB: 'Débris',
+  UNK: 'Nature inconnue',
+};
 
 /** Comptage d'une facette pour l'UI de filtrage. */
 export interface FacetCount {
@@ -76,6 +105,8 @@ export interface CatalogSnapshot {
   readonly satellites: SatelliteRecord[];
   readonly categories: FacetCount[];
   readonly regimes: FacetCount[];
+  /** Comptage par propriétaire (pays / agence / opérateur), effectif décroissant. */
+  readonly owners: FacetCount[];
   readonly sources: SourceStatus[];
   readonly warnings: string[];
 }

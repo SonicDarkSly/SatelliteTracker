@@ -2,6 +2,7 @@
 import { AimOutlined, CloseOutlined, StarFilled, StarOutlined } from '@ant-design/icons';
 import { Alert, Button, Descriptions, Space, Tag, Tooltip, Typography } from 'antd';
 import { CATEGORY_COLORS } from '../constants';
+import { OBJECT_TYPE_LABELS } from '../types';
 import type { SatelliteRecord, SatelliteState } from '../types';
 import {
   epochAgeDays,
@@ -54,6 +55,16 @@ export function SatelliteDetails({
         </Space>
       </div>
 
+      {satellite.ownerLabel && (
+        <div className="details-owner">
+          {satellite.ownerFlag && <span className="details-flag">{satellite.ownerFlag}</span>}
+          <Text>{satellite.ownerLabel}</Text>
+          {satellite.ownerKind && satellite.ownerKind !== 'état' && (
+            <Text type="secondary"> ({satellite.ownerKind})</Text>
+          )}
+        </div>
+      )}
+
       <Space size={[4, 4]} wrap className="details-tags">
         {satellite.categories.map((c) => (
           <Tag key={c} color={CATEGORY_COLORS[c] ?? CATEGORY_COLORS.other}>
@@ -61,6 +72,9 @@ export function SatelliteDetails({
           </Tag>
         ))}
         <Tag bordered={false}>{satellite.regime}</Tag>
+        {satellite.objectType && satellite.objectType !== 'UNK' && (
+          <Tag bordered={false}>{OBJECT_TYPE_LABELS[satellite.objectType]}</Tag>
+        )}
       </Space>
 
       {age > 14 && (
@@ -100,6 +114,17 @@ export function SatelliteDetails({
         <Descriptions.Item label="Époque du TLE">
           {formatDateTime(satellite.epoch)}
         </Descriptions.Item>
+        {satellite.launchDate && (
+          <Descriptions.Item label="Lancement">
+            {new Date(satellite.launchDate).toLocaleDateString('fr-FR')}
+            {satellite.launchSite ? ` · ${satellite.launchSite}` : ''}
+          </Descriptions.Item>
+        )}
+        {satellite.rcsMeters2 !== undefined && (
+          <Descriptions.Item label="Surface radar">
+            {satellite.rcsMeters2.toFixed(2)} m²
+          </Descriptions.Item>
+        )}
       </Descriptions>
 
       <details className="tle-block">

@@ -1,8 +1,12 @@
-/** Barre supérieure : recherche, contrôle du temps, rafraîchissement. */
-import { ClockCircleOutlined, FilterOutlined, ReloadOutlined } from '@ant-design/icons';
-import { AutoComplete, Button, Select, Space, Switch, Tooltip, Typography } from 'antd';
-import { BASE_MAPS, TIME_RATES } from '../constants';
-import type { BaseMapKind } from './GlobeView';
+/** Barre supérieure : recherche, contrôle du temps, accès filtres et réglages. */
+import {
+  ClockCircleOutlined,
+  FilterOutlined,
+  ReloadOutlined,
+  SettingOutlined,
+} from '@ant-design/icons';
+import { AutoComplete, Button, Select, Space, Tooltip, Typography } from 'antd';
+import { TIME_RATES } from '../constants';
 import type { SatelliteRecord } from '../types';
 
 const { Text } = Typography;
@@ -16,13 +20,12 @@ interface Props {
   onRate: (rate: number) => void;
   simEpochMs: number;
   onSeek: (offsetMinutes: number) => void;
-  lighting: boolean;
-  onLighting: (value: boolean) => void;
-  baseMap: BaseMapKind;
-  onBaseMap: (value: BaseMapKind) => void;
   refreshing: boolean;
   onRefresh: () => void;
   onToggleFilters: () => void;
+  onToggleSettings: () => void;
+  /** Nombre de filtres actifs, affiché sur le bouton. */
+  activeFilterCount: number;
 }
 
 function formatClock(ms: number): string {
@@ -44,20 +47,21 @@ export function TopBar({
   onRate,
   simEpochMs,
   onSeek,
-  lighting,
-  onLighting,
-  baseMap,
-  onBaseMap,
   refreshing,
   onRefresh,
   onToggleFilters,
+  onToggleSettings,
+  activeFilterCount,
 }: Props): JSX.Element {
   return (
     <header className="topbar">
       <Space size={8} className="topbar-left">
-        <Button icon={<FilterOutlined />} onClick={onToggleFilters} className="filters-toggle">
-          Filtres
+        <Button icon={<FilterOutlined />} onClick={onToggleFilters}>
+          Filtres{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
         </Button>
+        <Tooltip title="Réglages d'affichage">
+          <Button icon={<SettingOutlined />} onClick={onToggleSettings} />
+        </Tooltip>
         <Text strong className="brand">
           SatelliteTracker
         </Text>
@@ -72,7 +76,10 @@ export function TopBar({
           value: String(m.index),
           label: (
             <span className="search-option">
-              <span>{m.satellite.name}</span>
+              <span>
+                {m.satellite.ownerFlag ? `${m.satellite.ownerFlag} ` : ''}
+                {m.satellite.name}
+              </span>
               <Text type="secondary">
                 {m.satellite.regime} · {m.satellite.noradId}
               </Text>
@@ -100,19 +107,6 @@ export function TopBar({
 
         <Tooltip title="Revenir à l'instant présent">
           <Button onClick={() => onSeek(0)}>Maintenant</Button>
-        </Tooltip>
-
-        <Tooltip title="Fond de carte">
-          <Select
-            value={baseMap}
-            onChange={onBaseMap}
-            className="basemap-select"
-            options={BASE_MAPS.map((b) => ({ value: b.value, label: b.label }))}
-          />
-        </Tooltip>
-
-        <Tooltip title="Éclairage jour / nuit">
-          <Switch checked={lighting} onChange={onLighting} checkedChildren="☀" unCheckedChildren="☾" />
         </Tooltip>
 
         <Tooltip title="Recharger les éléments orbitaux depuis la source">

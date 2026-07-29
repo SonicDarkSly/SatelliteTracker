@@ -17,7 +17,6 @@ const BASEMAP_CREDITS: Record<BaseMapKind, string> = {
 
 interface Props {
   snapshot: CatalogSnapshot | undefined;
-  origin: string | undefined;
   propagableCount: number;
   visibleCount: number;
   baseMap: BaseMapKind;
@@ -29,7 +28,7 @@ interface Props {
  * attributions, regroupées avec les autres sources de données.
  */
 export const StatusBar = forwardRef<HTMLDivElement, Props>(function StatusBar(
-  { snapshot, origin, propagableCount, visibleCount, baseMap },
+  { snapshot, propagableCount, visibleCount, baseMap },
   creditRef,
 ) {
   const failed = snapshot?.sources.filter((s) => !s.ok) ?? [];
@@ -80,7 +79,6 @@ export const StatusBar = forwardRef<HTMLDivElement, Props>(function StatusBar(
               <Text type="secondary">
                 TLE du {formatDateTime(snapshot.fetchedAt)}
                 {snapshot.stale ? ' (périmés)' : ''}
-                {origin ? ` · ${origin}` : ''}
               </Text>
             </Tooltip>
           </>

@@ -78,6 +78,20 @@ export function catalogTtlMs(): number {
   return (Number.isFinite(minutes) && minutes > 0 ? minutes : 120) * 60_000;
 }
 
+/** URL du SATCAT complet (registre du catalogue, propriétaires et lancements). */
+export function satcatUrl(): string {
+  return process.env.CELESTRAK_SATCAT_URL ?? 'https://celestrak.org/pub/satcat.csv';
+}
+
+/**
+ * Durée de vie du SATCAT en mémoire (SATCAT_TTL_HOURS, défaut 24 h).
+ * Ces métadonnées ne bougent qu'au rythme des lancements.
+ */
+export function satcatTtlMs(): number {
+  const hours = Number(process.env.SATCAT_TTL_HOURS ?? 24);
+  return (Number.isFinite(hours) && hours > 0 ? hours : 24) * 3_600_000;
+}
+
 /** Époque maximale acceptée : au-delà, le TLE est trop vieux pour être précis. */
 export function maxEpochAgeDays(): number {
   const days = Number(process.env.MAX_EPOCH_AGE_DAYS ?? 30);

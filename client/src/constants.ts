@@ -61,12 +61,15 @@ export const BASE_MAPS = [
 
 /** Clés localStorage (aucune persistance serveur : tout est local au navigateur). */
 export const STORAGE_KEYS = {
+  /** Conservée pour purger l'ancienne copie du catalogue (voir useCatalog). */
   catalog: 'sattracker.catalog.v1',
   filters: 'sattracker.filters.v1',
   favorites: 'sattracker.favorites.v1',
-  lighting: 'sattracker.lighting.v1',
-  baseMap: 'sattracker.basemap.v1',
+  settings: 'sattracker.settings.v1',
 } as const;
 
-/** Durée de validité de la copie locale du catalogue (2 h, comme le cache serveur). */
-export const LOCAL_CATALOG_TTL_MS = 2 * 60 * 60 * 1000;
+/**
+ * Plafond d'orbites tracées simultanément. Une orbite = 120 segments ; au-delà
+ * de quelques centaines, le globe devient illisible bien avant d'être lent.
+ */
+export const ORBIT_BATCH_MAX = 200;

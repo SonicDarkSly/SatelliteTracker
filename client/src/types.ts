@@ -16,7 +16,25 @@ export interface SatelliteRecord {
   altitudeKm: number;
   regime: OrbitRegime;
   categories: string[];
+
+  /* Champs issus du SATCAT (absents si le registre n'a pas pu être récupéré). */
+  owner?: string;
+  ownerLabel?: string;
+  ownerFlag?: string;
+  ownerKind?: string;
+  objectType?: 'PAY' | 'R/B' | 'DEB' | 'UNK';
+  launchDate?: string;
+  launchSite?: string;
+  rcsMeters2?: number;
 }
+
+/** Libellés FR des natures d'objet du SATCAT. */
+export const OBJECT_TYPE_LABELS: Record<string, string> = {
+  PAY: 'Charge utile',
+  'R/B': 'Étage de lanceur',
+  DEB: 'Débris',
+  UNK: 'Nature inconnue',
+};
 
 export interface FacetCount {
   id: string;
@@ -40,6 +58,7 @@ export interface CatalogSnapshot {
   satellites: SatelliteRecord[];
   categories: FacetCount[];
   regimes: FacetCount[];
+  owners: FacetCount[];
   sources: SourceStatus[];
   warnings: string[];
 }
@@ -64,6 +83,8 @@ export type WorkerRequest =
   | { type: 'init'; tles: { line1: string; line2: string }[] }
   | { type: 'clock'; simEpochMs: number; rate: number }
   | { type: 'orbit'; index: number }
+  /** Lot d'orbites (objets filtrés), échantillonnage réduit. */
+  | { type: 'orbits'; indices: number[] }
   | { type: 'detail'; index: number | null }
   | { type: 'stop' };
 
@@ -83,6 +104,15 @@ export type WorkerResponse =
       type: 'orbit';
       index: number;
       /** Ellipse orbitale fermée, ECEF en mètres, figée à l'instant de calcul. */
+      positions: Float32Array;
+    }
+  | {
+      type: 'orbits';
+      /** Index catalogue effectivement calculés (les TLE en échec sont omis). */
+      indices: number[];
+      /** Points par orbite (identique pour toutes). */
+      samples: number;
+      /** Concaténation des orbites : indices[k] occupe [k·samples·3, (k+1)·samples·3[. */
       positions: Float32Array;
     }
   | { type: 'detail'; index: number; state: SatelliteState };

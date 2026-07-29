@@ -20,11 +20,22 @@ export interface PropagationFrame {
   receivedAt: number;
 }
 
+/** Lot d'orbites des objets affichés. */
+export interface OrbitBatch {
+  indices: number[];
+  samples: number;
+  positions: Float32Array;
+}
+
 export interface Propagation {
   /** Dernière trame reçue (référence mutable, lue dans la boucle de rendu). */
   frameRef: React.MutableRefObject<PropagationFrame | undefined>;
   /** Ellipse orbitale du satellite suivi, ECEF en mètres. */
   orbit: { index: number; positions: Float32Array } | undefined;
+  /** Orbites des objets affichés (vide si le réglage est désactivé ou plafond dépassé). */
+  orbits: OrbitBatch | undefined;
+  /** Demande le tracé des orbites de ces objets (tableau vide pour tout effacer). */
+  setOrbitTargets: (indices: number[]) => void;
   /** Position géodésique du satellite suivi, rafraîchie à chaque trame. */
   detail: { index: number; state: SatelliteState } | undefined;
   ready: boolean;
@@ -46,9 +57,12 @@ export function usePropagation(satellites: SatelliteRecord[] | undefined): Propa
   const clockRef = useRef({ anchorWallMs: Date.now(), anchorSimMs: Date.now(), rate: 1 });
   const trackedRef = useRef<number | null>(null);
 
+  const orbitTargetsRef = useRef<number[]>([]);
+
   const [ready, setReady] = useState(false);
   const [propagableCount, setPropagableCount] = useState(0);
   const [orbit, setOrbit] = useState<Propagation['orbit']>();
+  const [orbits, setOrbits] = useState<OrbitBatch | undefined>();
   const [detail, setDetail] = useState<Propagation['detail']>();
   const [rate, setRateState] = useState(1);
 
@@ -81,6 +95,13 @@ export function usePropagation(satellites: SatelliteRecord[] | undefined): Propa
         case 'orbit':
           setOrbit({ index: message.index, positions: message.positions });
           break;
+        case 'orbits':
+          setOrbits({
+            indices: message.indices,
+            samples: message.samples,
+            positions: message.positions,
+          });
+          break;
         case 'detail':
           setDetail({ index: message.index, state: message.state });
           break;
@@ -105,17 +126,37 @@ export function usePropagation(satellites: SatelliteRecord[] | undefined): Propa
     });
   }, [satellites]);
 
-  // Rafraîchissement périodique de l'ellipse orbitale suivie : l'orbite est
-  // figée dans le repère inertiel au moment du calcul, elle « glisse » donc
-  // lentement par rapport au repère terrestre affiché.
+  // Rafraîchissement périodique des orbites : elles sont figées dans le repère
+  // inertiel au moment du calcul et « glissent » donc lentement par rapport au
+  // repère terrestre affiché. Le satellite suivi est réactualisé plus souvent
+  // que le lot, dont le recalcul est plus lourd.
   useEffect(() => {
-    const id = window.setInterval(() => {
+    const tracked = window.setInterval(() => {
       const index = trackedRef.current;
       if (index !== null && workerRef.current) {
         workerRef.current.postMessage({ type: 'orbit', index });
       }
     }, 2000);
-    return () => window.clearInterval(id);
+
+    const batch = window.setInterval(() => {
+      if (orbitTargetsRef.current.length > 0 && workerRef.current) {
+        workerRef.current.postMessage({ type: 'orbits', indices: orbitTargetsRef.current });
+      }
+    }, 6000);
+
+    return () => {
+      window.clearInterval(tracked);
+      window.clearInterval(batch);
+    };
+  }, []);
+
+  const setOrbitTargets = useCallback((indices: number[]) => {
+    orbitTargetsRef.current = indices;
+    if (indices.length === 0) {
+      setOrbits(undefined);
+      return;
+    }
+    workerRef.current?.postMessage({ type: 'orbits', indices });
   }, []);
 
   const pushClock = useCallback((simEpochMs: number, nextRate: number) => {
@@ -157,6 +198,8 @@ export function usePropagation(satellites: SatelliteRecord[] | undefined): Propa
     () => ({
       frameRef,
       orbit,
+      orbits,
+      setOrbitTargets,
       detail,
       ready,
       propagableCount,
@@ -166,6 +209,18 @@ export function usePropagation(satellites: SatelliteRecord[] | undefined): Propa
       track,
       simNow,
     }),
-    [orbit, detail, ready, propagableCount, rate, setRate, seek, track, simNow],
+    [
+      orbit,
+      orbits,
+      setOrbitTargets,
+      detail,
+      ready,
+      propagableCount,
+      rate,
+      setRate,
+      seek,
+      track,
+      simNow,
+    ],
   );
 }

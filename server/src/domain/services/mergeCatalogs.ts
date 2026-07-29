@@ -48,6 +48,26 @@ export function countCategories(satellites: SatelliteRecord[]): FacetCount[] {
     .sort((a, b) => b.count - a.count);
 }
 
+/**
+ * Comptages par propriétaire (pays, agence, opérateur), effectif décroissant.
+ * Les objets non identifiés par le SATCAT sont regroupés sous « UNK ».
+ */
+export function countOwners(satellites: SatelliteRecord[]): FacetCount[] {
+  const counts = new Map<string, { label: string; count: number }>();
+
+  for (const sat of satellites) {
+    const code = sat.owner ?? 'UNK';
+    const label = sat.ownerLabel ?? 'Propriétaire inconnu';
+    const entry = counts.get(code);
+    if (entry) entry.count++;
+    else counts.set(code, { label, count: 1 });
+  }
+
+  return [...counts.entries()]
+    .map(([id, { label, count }]) => ({ id, label, count }))
+    .sort((a, b) => b.count - a.count);
+}
+
 /** Comptages par régime orbital, dans l'ordre LEO → MEO → GEO → HEO. */
 export function countRegimes(satellites: SatelliteRecord[]): FacetCount[] {
   const order = ['LEO', 'MEO', 'GEO', 'HEO'] as const;

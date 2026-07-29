@@ -16,8 +16,15 @@ import type { WorkerRequest, WorkerResponse } from '../types';
 
 /** Cadence d'envoi des trames au thread principal (ms). */
 const FRAME_INTERVAL_MS = 500;
-/** Nombre de points d'échantillonnage d'une ellipse orbitale. */
+/** Nombre de points d'échantillonnage de l'ellipse du satellite suivi. */
 const ORBIT_SAMPLES = 240;
+
+/**
+ * Échantillonnage réduit pour les orbites de masse : 60 segments suffisent à
+ * l'œil sur une ellipse vue de loin, et divisent par 4 le coût d'un lot de 200
+ * orbites (12 000 propagations au lieu de 48 000).
+ */
+const ORBIT_BATCH_SAMPLES = 60;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SatRec = any;
@@ -171,6 +178,52 @@ function computeOrbit(index: number): void {
   post({ type: 'orbit', index, positions: out }, [out.buffer]);
 }
 
+/**
+ * Lot d'orbites pour les objets actuellement affichés.
+ * Même principe que `computeOrbit` (temps sidéral figé), mais avec un
+ * échantillonnage réduit et un seul transfert pour tout le lot.
+ */
+function computeOrbits(indices: number[]): void {
+  const samples = ORBIT_BATCH_SAMPLES + 1;
+  const startMs = simNowMs();
+  const gmst = satellite.gstime(new Date(startMs));
+
+  const kept: number[] = [];
+  const buffer = new Float32Array(indices.length * samples * 3);
+  let write = 0;
+
+  for (const index of indices) {
+    const rec = satrecs[index];
+    if (!rec || valid[index] === 0) continue;
+
+    const periodMinutes = (2 * Math.PI) / rec.no;
+    const start = write;
+    let ok = true;
+
+    for (let s = 0; s < samples; s++) {
+      const when = new Date(startMs + (s / ORBIT_BATCH_SAMPLES) * periodMinutes * 60_000);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const pv = satellite.propagate(rec, when) as any;
+      const eci = pv?.position as EciVector | false | undefined;
+      if (!eci || !Number.isFinite(eci.x)) {
+        ok = false;
+        break;
+      }
+      const ecf = satellite.eciToEcf(eci, gmst) as EciVector;
+      buffer[start + s * 3] = ecf.x * 1000;
+      buffer[start + s * 3 + 1] = ecf.y * 1000;
+      buffer[start + s * 3 + 2] = ecf.z * 1000;
+    }
+
+    if (!ok) continue; // orbite abandonnée : l'emplacement est réutilisé
+    kept.push(index);
+    write += samples * 3;
+  }
+
+  const positions = buffer.slice(0, write);
+  post({ type: 'orbits', indices: kept, samples, positions }, [positions.buffer]);
+}
+
 function start(): void {
   if (timer !== undefined) return;
   computeFrame();
@@ -198,6 +251,9 @@ self.addEventListener('message', (event: MessageEvent) => {
       break;
     case 'orbit':
       computeOrbit(request.index);
+      break;
+    case 'orbits':
+      computeOrbits(request.indices);
       break;
     case 'detail':
       detailIndex = request.index;

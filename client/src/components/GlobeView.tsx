@@ -22,21 +22,26 @@ import {
   LabelCollection,
   LabelStyle,
   Material,
+  Matrix3,
   NearFarScalar,
   OpenStreetMapImageryProvider,
   PointPrimitiveCollection,
   PolylineCollection,
   ScreenSpaceEventHandler,
   ScreenSpaceEventType,
+  Simon1994PlanetaryPositions,
   TileMapServiceImageryProvider,
+  Transforms,
   UrlTemplateImageryProvider,
   VerticalOrigin,
   Viewer,
   buildModuleUrl,
+  defined,
   Math as CesiumMath,
 } from 'cesium';
 import 'cesium/Build/Cesium/Widgets/widgets.css';
-import type { PropagationFrame } from '../hooks/usePropagation';
+import type { OrbitBatch, PropagationFrame } from '../hooks/usePropagation';
+import type { DisplaySettings } from '../hooks/useSettings';
 import type { SatelliteRecord } from '../types';
 import { colorForCategories } from '../utils/format';
 
@@ -52,12 +57,12 @@ interface Props {
   selectedIndex: number | null;
   /** Ellipse orbitale du satellite sélectionné (ECEF, mètres). */
   orbit: { index: number; positions: Float32Array } | undefined;
+  /** Orbites des objets affichés. */
+  orbits: OrbitBatch | undefined;
   onSelect: (index: number | null) => void;
   /** Incrémenté pour demander un recentrage caméra sur la sélection. */
   focusNonce: number;
-  /** Éclairage réaliste (terminateur jour/nuit). */
-  lighting: boolean;
-  baseMap: BaseMapKind;
+  settings: DisplaySettings;
   /**
    * Conteneur d'accueil des crédits Cesium. En le fournissant, on sort le logo
    * et les attributions du globe pour les afficher dans la barre d'état — les
@@ -69,26 +74,32 @@ interface Props {
   simNow: () => number;
 }
 
-/** Taille de base des points, en pixels (avant mise à l'échelle par distance). */
-const POINT_SIZE = 4;
-const SELECTED_POINT_SIZE = 10;
-
-/**
- * Mise à l'échelle des points selon la distance à la caméra : un satellite
- * survolé de près doit être gros et facile à viser, un satellite à l'autre bout
- * du globe doit rester un point discret. Sans cela, tout reste minuscule dès
- * qu'on zoome et devient impossible à cliquer.
- */
-const POINT_SCALE = new NearFarScalar(6.0e5, 3.4, 4.5e7, 0.85);
-
 /** Tolérance de sélection, en pixels : viser un point de 4 px en mouvement est illusoire. */
-const PICK_TOLERANCE = 14;
+const PICK_TOLERANCE = 16;
 
 /** Cadence de rafraîchissement de l'info-bulle de survol (ms). */
 const HOVER_REFRESH_MS = 150;
 
-/** Rayon terrestre moyen (km), pour l'altitude affichée au survol. */
+/** Distances de référence de la mise à l'échelle des points (mètres). */
+const SCALE_NEAR_M = 3.0e5;
+const SCALE_FAR_M = 6.0e7;
+const SCALE_FAR_FACTOR = 0.8;
+
+/** Rayon terrestre moyen (km), repli pour l'altitude affichée au survol. */
 const EARTH_RADIUS_KM = 6371;
+
+/**
+ * Distance de recul maximale de la caméra : 1,2 million de km, soit un peu plus
+ * de trois fois la distance Terre–Lune (384 400 km en moyenne). Sans cela, on ne
+ * peut pas reculer assez pour voir la Lune, que Cesium place pourtant à sa
+ * distance et à sa taille réelles.
+ */
+const MAX_ZOOM_OUT_M = 1.2e9;
+
+/** Tampons réutilisés pour la position de la Lune (évite d'allouer à chaque image). */
+const moonScratch = new Cartesian3();
+const moonFixedScratch = new Cartesian3();
+const icrfScratch = new Matrix3();
 
 interface HoverInfo {
   index: number;
@@ -99,6 +110,40 @@ interface HoverInfo {
   longitude: number;
   altitudeKm: number;
   speedKmS: number;
+}
+
+/**
+ * Mise à l'échelle selon la distance à la caméra : un objet survolé de près doit
+ * être gros et facile à viser, un objet à l'autre bout du globe doit rester un
+ * point discret. Sans cela, tout reste minuscule dès qu'on zoome.
+ */
+function scaleByDistance(zoomBoost: number): NearFarScalar {
+  return new NearFarScalar(SCALE_NEAR_M, zoomBoost, SCALE_FAR_M, SCALE_FAR_FACTOR);
+}
+
+/**
+ * Position de la Lune dans le repère terrestre tournant, à un instant donné.
+ *
+ * Cesium calcule la position lunaire dans le repère inertiel (théorie de Simon
+ * et al. 1994, la même que celle utilisée pour son propre rendu de la Lune) ;
+ * il faut ensuite la faire tourner dans le repère fixe terrestre. La matrice
+ * ICRF → fixe demande les données de rotation terrestre IAU2006, qui se chargent
+ * en tâche de fond : tant qu'elles manquent, on se rabat sur l'approximation
+ * TEME → pseudo-fixe (erreur de quelques arcsecondes, invisible à cette échelle).
+ */
+function moonPositionFixed(time: JulianDate): Cartesian3 | undefined {
+  const inertial = Simon1994PlanetaryPositions.computeMoonPositionInEarthInertialFrame(
+    time,
+    moonScratch,
+  );
+  if (!inertial) return undefined;
+
+  const rotation =
+    Transforms.computeIcrfToFixedMatrix(time, icrfScratch) ??
+    Transforms.computeTemeToPseudoFixedMatrix(time, icrfScratch);
+  if (!defined(rotation)) return undefined;
+
+  return Matrix3.multiplyByVector(rotation, inertial, moonFixedScratch);
 }
 
 /** Couche d'imagerie correspondant au fond choisi. */
@@ -134,10 +179,10 @@ export function GlobeView({
   frameRef,
   selectedIndex,
   orbit,
+  orbits,
   onSelect,
   focusNonce,
-  lighting,
-  baseMap,
+  settings,
   creditContainer,
   simNow,
 }: Props): JSX.Element {
@@ -145,38 +190,45 @@ export function GlobeView({
   const viewerRef = useRef<Viewer | undefined>(undefined);
   const pointsRef = useRef<PointPrimitiveCollection | undefined>(undefined);
   const labelsRef = useRef<LabelCollection | undefined>(undefined);
-  const polylinesRef = useRef<PolylineCollection | undefined>(undefined);
+  /** Orbite du satellite suivi (trait net). */
+  const trackedOrbitRef = useRef<PolylineCollection | undefined>(undefined);
+  /** Orbites de masse (traits fins et translucides). */
+  const batchOrbitsRef = useRef<PolylineCollection | undefined>(undefined);
 
   // Références lues dans la boucle de rendu : évitent de recréer la scène à
   // chaque changement de filtre ou de sélection.
   const visibleRef = useRef(visible);
   const selectedRef = useRef(selectedIndex);
   const satellitesRef = useRef(satellites);
+  const showLabelRef = useRef(settings.showLabel);
+  const moonRef = useRef(settings.moon);
   visibleRef.current = visible;
   selectedRef.current = selectedIndex;
   satellitesRef.current = satellites;
+  showLabelRef.current = settings.showLabel;
+  moonRef.current = settings.moon;
 
-  /** Dernière position connue du curseur dans le canvas (null = curseur sorti). */
+  /** Dernière position connue du curseur dans le canvas (undefined = curseur sorti). */
   const cursorRef = useRef<Cartesian2 | undefined>(undefined);
   const [hover, setHover] = useState<HoverInfo | undefined>();
 
   /**
    * Recalcule l'info-bulle depuis la dernière position du curseur.
-   * Appelé au mouvement de souris ET périodiquement : le satellite se déplace
-   * sous un curseur immobile, l'info-bulle doit suivre (et disparaître quand
-   * l'objet s'éloigne).
+   * Appelé périodiquement : le satellite se déplace sous un curseur immobile,
+   * l'info-bulle doit suivre (et disparaître quand l'objet s'éloigne).
    */
   const refreshHover = useCallback(() => {
     const viewer = viewerRef.current;
     const cursor = cursorRef.current;
     const sats = satellitesRef.current;
+
     if (!viewer || !cursor || !sats) {
       setHover((h) => (h ? undefined : h));
       return;
     }
 
     const picked = viewer.scene.pick(cursor, PICK_TOLERANCE, PICK_TOLERANCE) as
-      | { id?: unknown; primitive?: unknown }
+      | { id?: unknown }
       | undefined;
     const index = typeof picked?.id === 'number' ? picked.id : undefined;
 
@@ -194,8 +246,6 @@ export function GlobeView({
     const position = points.get(index).position;
     const carto = Cartographic.fromCartesian(position);
     const o = index * 3;
-    const speedKmS =
-      Math.hypot(frame.velocities[o], frame.velocities[o + 1], frame.velocities[o + 2]) / 1000;
 
     setHover({
       index,
@@ -206,7 +256,8 @@ export function GlobeView({
       altitudeKm: carto
         ? carto.height / 1000
         : Cartesian3.magnitude(position) / 1000 - EARTH_RADIUS_KM,
-      speedKmS,
+      speedKmS:
+        Math.hypot(frame.velocities[o], frame.velocities[o + 1], frame.velocities[o + 2]) / 1000,
     });
   }, [frameRef]);
 
@@ -217,7 +268,7 @@ export function GlobeView({
     if (!containerRef.current) return;
 
     const viewer = new Viewer(containerRef.current, {
-      baseLayer: createImagery(baseMap),
+      baseLayer: createImagery(settings.baseMap),
       baseLayerPicker: false,
       geocoder: false,
       homeButton: false,
@@ -233,25 +284,24 @@ export function GlobeView({
       ...(creditContainer.current ? { creditContainer: creditContainer.current } : {}),
     });
 
-    viewer.scene.globe.enableLighting = lighting;
-    if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = true;
-    viewer.scene.globe.showGroundAtmosphere = true;
     viewer.scene.fog.enabled = false;
-    // Distances de travail : de la vue rapprochée jusqu'au-delà du géostationnaire.
+    // Distances de travail : de la vue rapprochée jusqu'au-delà de l'orbite lunaire.
     viewer.scene.screenSpaceCameraController.minimumZoomDistance = 50_000;
-    viewer.scene.screenSpaceCameraController.maximumZoomDistance = 200_000_000;
+    viewer.scene.screenSpaceCameraController.maximumZoomDistance = MAX_ZOOM_OUT_M;
     viewer.camera.setView({
       destination: Cartesian3.fromDegrees(6.14, 46.2, 42_000_000),
     });
 
     const points = viewer.scene.primitives.add(new PointPrimitiveCollection());
+    const batchOrbits = viewer.scene.primitives.add(new PolylineCollection());
+    const trackedOrbit = viewer.scene.primitives.add(new PolylineCollection());
     const labels = viewer.scene.primitives.add(new LabelCollection());
-    const polylines = viewer.scene.primitives.add(new PolylineCollection());
 
     viewerRef.current = viewer;
     pointsRef.current = points;
     labelsRef.current = labels;
-    polylinesRef.current = polylines;
+    trackedOrbitRef.current = trackedOrbit;
+    batchOrbitsRef.current = batchOrbits;
 
     const handler = new ScreenSpaceEventHandler(viewer.scene.canvas);
 
@@ -263,8 +313,8 @@ export function GlobeView({
       onSelect(typeof picked?.id === 'number' ? picked.id : null);
     }, ScreenSpaceEventType.LEFT_CLICK);
 
-    // Survol : on mémorise la position du curseur, le recalcul est fait ailleurs
-    // (le pick est une lecture GPU, inutile de l'exécuter à chaque pixel parcouru).
+    // Survol : on mémorise la position du curseur, le pick (lecture GPU) est
+    // fait à cadence fixe plutôt qu'à chaque pixel parcouru.
     handler.setInputAction((movement: { endPosition: Cartesian2 }) => {
       cursorRef.current = movement.endPosition.clone();
     }, ScreenSpaceEventType.MOUSE_MOVE);
@@ -312,12 +362,29 @@ export function GlobeView({
       const labelCollection = labelsRef.current;
       if (labelCollection && labelCollection.length > 0) {
         const label = labelCollection.get(0);
-        if (selected !== null && selected < count && valid[selected] === 1) {
+        const wanted =
+          showLabelRef.current && selected !== null && selected < count && valid[selected] === 1;
+        if (wanted && selected !== null) {
           label.position = collection.get(selected).position;
           label.text = sats[selected].name;
           label.show = true;
-        } else {
+        } else if (label.show) {
           label.show = false;
+        }
+      }
+
+      // Étiquette de la Lune, avec sa distance instantanée au centre de la Terre.
+      if (labelCollection && labelCollection.length > 1) {
+        const moonLabel = labelCollection.get(1);
+        if (!moonRef.current) {
+          if (moonLabel.show) moonLabel.show = false;
+        } else {
+          const position = moonPositionFixed(viewer.clock.currentTime);
+          if (position) {
+            moonLabel.position = position;
+            moonLabel.text = `Lune — ${Math.round(Cartesian3.magnitude(position) / 1000).toLocaleString('fr-FR')} km`;
+            moonLabel.show = true;
+          }
         }
       }
     };
@@ -332,17 +399,24 @@ export function GlobeView({
       viewerRef.current = undefined;
       pointsRef.current = undefined;
       labelsRef.current = undefined;
-      polylinesRef.current = undefined;
+      trackedOrbitRef.current = undefined;
+      batchOrbitsRef.current = undefined;
     };
     // Volontairement monté une seule fois : les mises à jour passent par les refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* Rafraîchissement périodique de l'info-bulle (le satellite bouge, pas le curseur). */
+  /* Rafraîchissement de l'info-bulle (le satellite bouge, pas le curseur). */
   useEffect(() => {
+    if (!settings.hoverTooltip) {
+      setHover(undefined);
+      const viewer = viewerRef.current;
+      if (viewer) viewer.scene.canvas.style.cursor = '';
+      return;
+    }
     const id = window.setInterval(refreshHover, HOVER_REFRESH_MS);
     return () => window.clearInterval(id);
-  }, [refreshHover]);
+  }, [refreshHover, settings.hoverTooltip]);
 
   /* --------------------------------------------------------------- */
   /* Peuplement de la collection quand le catalogue change            */
@@ -355,13 +429,14 @@ export function GlobeView({
     points.removeAll();
     labels.removeAll();
 
+    const scale = scaleByDistance(settings.zoomBoost);
     for (let i = 0; i < satellites.length; i++) {
       points.add({
         id: i,
         position: Cartesian3.ZERO,
         color: Color.fromCssColorString(colorForCategories(satellites[i].categories)),
-        pixelSize: POINT_SIZE,
-        scaleByDistance: POINT_SCALE,
+        pixelSize: settings.pointSize,
+        scaleByDistance: scale,
         show: false,
       });
     }
@@ -379,7 +454,41 @@ export function GlobeView({
       pixelOffset: new Cartesian2(14, -10),
       show: false,
     });
+
+    // Étiquette de la Lune (position mise à jour dans la boucle de rendu).
+    labels.add({
+      position: Cartesian3.ZERO,
+      text: 'Lune',
+      font: '12px "Segoe UI", system-ui, sans-serif',
+      fillColor: Color.fromCssColorString('#d9d9d9'),
+      outlineColor: Color.BLACK,
+      outlineWidth: 3,
+      style: LabelStyle.FILL_AND_OUTLINE,
+      horizontalOrigin: HorizontalOrigin.LEFT,
+      verticalOrigin: VerticalOrigin.BOTTOM,
+      pixelOffset: new Cartesian2(16, -12),
+      show: false,
+    });
+    // La taille est réappliquée par l'effet dédié : pas de dépendance ici, sinon
+    // toute la collection serait reconstruite à chaque mouvement de curseur.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [satellites]);
+
+  /* --------------------------------------------------------------- */
+  /* Taille des points                                                */
+  /* --------------------------------------------------------------- */
+  useEffect(() => {
+    const points = pointsRef.current;
+    if (!points) return;
+
+    const scale = scaleByDistance(settings.zoomBoost);
+    const selected = selectedIndex;
+    for (let i = 0; i < points.length; i++) {
+      const point = points.get(i);
+      point.pixelSize = i === selected ? settings.pointSize * 2.5 : settings.pointSize;
+      point.scaleByDistance = scale;
+    }
+  }, [settings.pointSize, settings.zoomBoost, satellites, selectedIndex]);
 
   /* --------------------------------------------------------------- */
   /* Mise en évidence de la sélection                                 */
@@ -392,14 +501,14 @@ export function GlobeView({
     const previous = previousSelected.current;
     if (previous !== null && previous < points.length) {
       const point = points.get(previous);
-      point.pixelSize = POINT_SIZE;
+      point.pixelSize = settings.pointSize;
       point.color = Color.fromCssColorString(colorForCategories(satellites[previous].categories));
       point.outlineWidth = 0;
     }
 
     if (selectedIndex !== null && selectedIndex < points.length) {
       const point = points.get(selectedIndex);
-      point.pixelSize = SELECTED_POINT_SIZE;
+      point.pixelSize = settings.pointSize * 2.5;
       point.color = Color.WHITE;
       point.outlineColor = Color.fromCssColorString(
         colorForCategories(satellites[selectedIndex].categories),
@@ -408,13 +517,13 @@ export function GlobeView({
     }
 
     previousSelected.current = selectedIndex;
-  }, [selectedIndex, satellites]);
+  }, [selectedIndex, satellites, settings.pointSize]);
 
   /* --------------------------------------------------------------- */
-  /* Tracé de l'ellipse orbitale                                      */
+  /* Orbite du satellite suivi                                        */
   /* --------------------------------------------------------------- */
   useEffect(() => {
-    const polylines = polylinesRef.current;
+    const polylines = trackedOrbitRef.current;
     if (!polylines) return;
 
     polylines.removeAll();
@@ -430,14 +539,49 @@ export function GlobeView({
 
     polylines.add({
       positions,
-      width: 1.6,
+      width: 2,
       material: Material.fromType('Color', {
         color: Color.fromCssColorString(
           colorForCategories(satellites[orbit.index].categories),
-        ).withAlpha(0.75),
+        ).withAlpha(0.85),
       }),
     });
   }, [orbit, selectedIndex, satellites]);
+
+  /* --------------------------------------------------------------- */
+  /* Orbites des objets affichés                                      */
+  /* --------------------------------------------------------------- */
+  useEffect(() => {
+    const polylines = batchOrbitsRef.current;
+    if (!polylines) return;
+
+    polylines.removeAll();
+    if (!orbits || !satellites || !settings.showOrbits) return;
+
+    const stride = orbits.samples * 3;
+    for (let k = 0; k < orbits.indices.length; k++) {
+      const index = orbits.indices[k];
+      const base = k * stride;
+      const positions: Cartesian3[] = [];
+      for (let s = 0; s < orbits.samples; s++) {
+        const o = base + s * 3;
+        positions.push(
+          new Cartesian3(orbits.positions[o], orbits.positions[o + 1], orbits.positions[o + 2]),
+        );
+      }
+      if (positions.length < 2) continue;
+
+      polylines.add({
+        positions,
+        width: 1,
+        material: Material.fromType('Color', {
+          color: Color.fromCssColorString(
+            colorForCategories(satellites[index].categories),
+          ).withAlpha(0.28),
+        }),
+      });
+    }
+  }, [orbits, satellites, settings.showOrbits]);
 
   /* --------------------------------------------------------------- */
   /* Recentrage caméra sur demande                                    */
@@ -466,19 +610,25 @@ export function GlobeView({
     });
   }, [focusNonce, selectedIndex]);
 
-  /* Éclairage jour/nuit */
+  /* Éclairage, atmosphère et Lune */
   useEffect(() => {
     const viewer = viewerRef.current;
-    if (viewer) viewer.scene.globe.enableLighting = lighting;
-  }, [lighting]);
+    if (!viewer) return;
+    viewer.scene.globe.enableLighting = settings.lighting;
+    viewer.scene.globe.showGroundAtmosphere = settings.atmosphere;
+    if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = settings.atmosphere;
+    // Cesium dessine la Lune comme une sphère texturée à sa position et à son
+    // rayon réels (1 737 km) : rien à modéliser, il suffit de l'activer.
+    if (viewer.scene.moon) viewer.scene.moon.show = settings.moon;
+  }, [settings.lighting, settings.atmosphere, settings.moon]);
 
   /* Changement de fond de carte */
   useEffect(() => {
     const viewer = viewerRef.current;
     if (!viewer) return;
     viewer.imageryLayers.removeAll();
-    viewer.imageryLayers.add(createImagery(baseMap));
-  }, [baseMap]);
+    viewer.imageryLayers.add(createImagery(settings.baseMap));
+  }, [settings.baseMap]);
 
   const hovered = hover !== undefined && satellites ? satellites[hover.index] : undefined;
 
@@ -498,6 +648,10 @@ export function GlobeView({
               style={{ background: colorForCategories(hovered.categories) }}
             />
             {hovered.name}
+          </div>
+          <div className="globe-tooltip-meta">
+            {hovered.ownerFlag ? `${hovered.ownerFlag} ` : ''}
+            {hovered.ownerLabel ?? 'propriétaire inconnu'}
           </div>
           <div className="globe-tooltip-meta">
             {hovered.regime} · NORAD {hovered.noradId}

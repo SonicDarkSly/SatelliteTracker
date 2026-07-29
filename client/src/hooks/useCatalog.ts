@@ -1,37 +1,33 @@
 /**
  * Chargement du catalogue.
- * Stratégie : copie localStorage affichée immédiatement (démarrage instantané et
- * fonctionnement hors ligne), puis rafraîchissement réseau en arrière-plan.
+ *
+ * Pas de copie localStorage : le catalogue complet pèse plus de 5 Mo en JSON,
+ * soit au-delà du quota localStorage de la plupart des navigateurs. L'écriture
+ * échouait silencieusement, et une copie partielle écrite lors d'un démarrage
+ * dégradé restait servie pendant des heures. Le serveur tourne en local et garde
+ * son propre cache de 2 h : la requête réseau est de toute façon quasi immédiate.
  */
 import { useCallback, useEffect, useState } from 'react';
-import { LOCAL_CATALOG_TTL_MS, STORAGE_KEYS } from '../constants';
+import { STORAGE_KEYS } from '../constants';
 import { localJson } from './useLocalStorage';
 import type { CatalogSnapshot } from '../types';
-
-interface StoredCatalog {
-  storedAt: number;
-  snapshot: CatalogSnapshot;
-}
 
 export interface CatalogState {
   snapshot: CatalogSnapshot | undefined;
   loading: boolean;
   refreshing: boolean;
   error: string | undefined;
-  /** Origine des données affichées. */
-  origin: 'réseau' | 'cache local' | undefined;
   refresh: (force?: boolean) => void;
 }
 
 export function useCatalog(): CatalogState {
   const [snapshot, setSnapshot] = useState<CatalogSnapshot | undefined>();
-  const [origin, setOrigin] = useState<CatalogState['origin']>();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | undefined>();
 
-  const fetchCatalog = useCallback(async (force: boolean, hadLocalCopy: boolean) => {
-    if (hadLocalCopy) setRefreshing(true);
+  const fetchCatalog = useCallback(async (force: boolean, hadData: boolean) => {
+    if (hadData) setRefreshing(true);
     else setLoading(true);
     setError(undefined);
 
@@ -43,13 +39,9 @@ export function useCatalog(): CatalogState {
 
       const data = (await response.json()) as CatalogSnapshot;
       setSnapshot(data);
-      setOrigin('réseau');
-      localJson.write(STORAGE_KEYS.catalog, { storedAt: Date.now(), snapshot: data });
     } catch (err) {
       setError(
-        err instanceof Error
-          ? `Catalogue indisponible : ${err.message}`
-          : 'Catalogue indisponible.',
+        err instanceof Error ? `Catalogue indisponible : ${err.message}` : 'Catalogue indisponible.',
       );
     } finally {
       setLoading(false);
@@ -58,17 +50,9 @@ export function useCatalog(): CatalogState {
   }, []);
 
   useEffect(() => {
-    const stored = localJson.read<StoredCatalog>(STORAGE_KEYS.catalog);
-    const usable = stored?.snapshot?.satellites?.length ? stored : undefined;
-
-    if (usable) {
-      setSnapshot(usable.snapshot);
-      setOrigin('cache local');
-      setLoading(false);
-    }
-
-    const expired = !usable || Date.now() - usable.storedAt > LOCAL_CATALOG_TTL_MS;
-    if (expired) void fetchCatalog(false, Boolean(usable));
+    // Nettoyage de l'ancienne copie locale (versions antérieures du client).
+    localJson.remove(STORAGE_KEYS.catalog);
+    void fetchCatalog(false, false);
   }, [fetchCatalog]);
 
   const refresh = useCallback(
@@ -76,5 +60,5 @@ export function useCatalog(): CatalogState {
     [fetchCatalog, snapshot],
   );
 
-  return { snapshot, loading, refreshing, error, origin, refresh };
+  return { snapshot, loading, refreshing, error, refresh };
 }

@@ -4,8 +4,9 @@
  */
 import { Module } from '@nestjs/common';
 import { CqrsModule } from '@nestjs/cqrs';
-import { CATALOG_CACHE_PORT, TLE_SOURCES } from './app.tokens.js';
+import { CATALOG_CACHE_PORT, METADATA_SOURCE, TLE_SOURCES } from './app.tokens.js';
 import { CelestrakSource } from './infrastructure/sources/CelestrakSource.js';
+import { CelestrakSatcatSource } from './infrastructure/sources/CelestrakSatcatSource.js';
 import { MemoryCatalogCache } from './infrastructure/cache/MemoryCatalogCache.js';
 import { configuredGroups } from './infrastructure/config/celestrak.js';
 import { SatelliteCatalogService } from './application/SatelliteCatalogService.js';
@@ -23,6 +24,7 @@ import { SatellitesController } from './interface/http/satellites.controller.js'
       provide: TLE_SOURCES,
       useFactory: () => configuredGroups().map((g) => new CelestrakSource(g.id, g.label)),
     },
+    { provide: METADATA_SOURCE, useClass: CelestrakSatcatSource },
     { provide: CATALOG_CACHE_PORT, useClass: MemoryCatalogCache },
     SatelliteCatalogService,
     GetCatalogQueryHandler,

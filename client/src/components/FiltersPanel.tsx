@@ -1,6 +1,7 @@
 /** Panneau de filtrage : catégories, régimes orbitaux, altitude. */
-import { Button, Checkbox, Divider, Slider, Space, Tag, Typography } from 'antd';
-import { CATEGORY_COLORS, DEFAULT_HIDDEN_CATEGORIES } from '../constants';
+import { Button, Checkbox, Divider, Select, Slider, Space, Tag, Typography } from 'antd';
+import { CATEGORY_COLORS } from '../constants';
+import { DEFAULT_FILTERS } from '../hooks/useSatelliteFilters';
 import type { FilterState } from '../hooks/useSatelliteFilters';
 import type { FacetCount } from '../types';
 
@@ -9,6 +10,7 @@ const { Text } = Typography;
 interface Props {
   categories: FacetCount[];
   regimes: FacetCount[];
+  owners: FacetCount[];
   filters: FilterState;
   onChange: (next: FilterState) => void;
   visibleCount: number;
@@ -20,6 +22,7 @@ const nf = new Intl.NumberFormat('fr-FR');
 export function FiltersPanel({
   categories,
   regimes,
+  owners,
   filters,
   onChange,
   visibleCount,
@@ -85,6 +88,28 @@ export function FiltersPanel({
       </Space>
 
       <Divider orientation="left" plain>
+        Pays / organisme
+      </Divider>
+      <Select
+        mode="multiple"
+        allowClear
+        className="owner-select"
+        placeholder="Tous (États, agences, opérateurs)"
+        value={filters.owners}
+        onChange={(owners: string[]) => onChange({ ...filters, owners })}
+        maxTagCount="responsive"
+        optionFilterProp="label"
+        options={owners.map((o) => ({
+          value: o.id,
+          label: `${o.label} (${nf.format(o.count)})`,
+        }))}
+      />
+      <Text type="secondary" className="filter-hint">
+        Propriétaire déclaré au registre SATCAT : État, agence spatiale (ESA, EUMETSAT) ou
+        opérateur (Intelsat, SES…). Aucune sélection = tous.
+      </Text>
+
+      <Divider orientation="left" plain>
         Altitude maximale
       </Divider>
       <Slider
@@ -104,17 +129,7 @@ export function FiltersPanel({
       </Text>
 
       <Divider plain />
-      <Button
-        block
-        onClick={() =>
-          onChange({
-            hiddenCategories: DEFAULT_HIDDEN_CATEGORIES,
-            hiddenRegimes: [],
-            search: filters.search,
-            maxAltitudeKm: 0,
-          })
-        }
-      >
+      <Button block onClick={() => onChange({ ...DEFAULT_FILTERS, search: filters.search })}>
         Réinitialiser les filtres
       </Button>
     </div>
