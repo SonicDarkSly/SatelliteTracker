@@ -102,6 +102,9 @@ export default function App(): JSX.Element {
     );
   }, [favorites, selected, setFavorites]);
 
+  /** Au moins une source en échec : l'alerte détaillée prime alors sur le voile. */
+  const sourcesFailed = snapshot?.sources.some((s) => !s.ok) ?? false;
+
   /**
    * Réglages demandés par l'utilisateur mais suspendus à cette échelle.
    * Affichés dans la barre d'état : sans cela, on active « orbites » ou
@@ -219,7 +222,7 @@ export default function App(): JSX.Element {
 
           {/* Récupération en cours côté serveur : le catalogue n'est pas encore
               arrivé, mais la page n'est pas bloquée pour autant. */}
-          {!error && snapshot?.fetching && satellites?.length === 0 && (
+          {!error && snapshot?.fetching && satellites?.length === 0 && !sourcesFailed && (
             <div className="overlay">
               <div className="overlay-stack">
                 <Spin size="large" />
@@ -234,7 +237,7 @@ export default function App(): JSX.Element {
 
           {/* Indisponibilité des sources : décompte vivant et relance
               automatique à l'échéance, plutôt qu'un message figé. */}
-          {!error && !loading && !snapshot?.fetching && snapshot && (
+          {!error && !loading && snapshot && sourcesFailed && (
             <SourceAlert snapshot={snapshot} onRetry={() => refresh(false)} />
           )}
 

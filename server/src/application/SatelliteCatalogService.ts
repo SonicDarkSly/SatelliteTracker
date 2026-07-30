@@ -97,6 +97,17 @@ export class SatelliteCatalogService {
    */
   private lastUnusable: { snapshot: CatalogSnapshot; attemptedAt: number } | undefined;
 
+  /**
+   * Dernier état connu des sources, conservé hors instantané.
+   *
+   * L'instantané provisoire renvoyé quand le budget de réponse est dépassé
+   * partait avec `sources: []` : le client n'avait donc plus rien à afficher et
+   * restait sur un voile « récupération en cours » muet, sans le motif de l'échec
+   * ni le décompte. On rejoue donc le dernier état connu dans ce provisoire.
+   */
+  private lastStatuses: SourceStatus[] = [];
+  private lastWarnings: string[] = [];
+
   constructor(
     @Inject(TLE_SOURCES) private readonly sources: TleSourcePort[],
     @Inject(METADATA_SOURCE) private readonly metadataSource: SatelliteMetadataPort,
@@ -169,7 +180,15 @@ export class SatelliteCatalogService {
         if (settled) return;
         settled = true;
         const cached = this.cache.read();
-        resolve({ ...(cached?.snapshot ?? emptySnapshot()), fetching: true });
+        const base = cached?.snapshot ?? emptySnapshot();
+        resolve({
+          ...base,
+          fetching: true,
+          // On préserve l'état connu des sources : c'est la seule information
+          // exploitable par le client tant que la récupération n'a pas abouti.
+          sources: base.sources.length > 0 ? base.sources : this.lastStatuses,
+          warnings: base.warnings.length > 0 ? base.warnings : this.lastWarnings,
+        });
       }, RESPONSE_BUDGET_MS);
 
       pending
@@ -237,6 +256,11 @@ export class SatelliteCatalogService {
           : `${result.label} indisponible : ${result.error ?? 'erreur'}`,
       );
     }
+
+    // Mémorisé avant toute sortie anticipée : le client doit pouvoir afficher le
+    // motif d'échec même si l'instantané servi est provisoire.
+    this.lastStatuses = statuses;
+    this.lastWarnings = warnings;
 
     const merged = mergeSatellites(lots);
 
