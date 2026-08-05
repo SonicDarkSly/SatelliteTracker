@@ -24,7 +24,14 @@ import { useLocalStorage } from './hooks/useLocalStorage';
 import { usePropagation } from './hooks/usePropagation';
 import { useSatelliteFilters } from './hooks/useSatelliteFilters';
 import { useSettings } from './hooks/useSettings';
-import { DEFAULT_HIDDEN_CATEGORIES, ORBIT_BATCH_MAX, STORAGE_KEYS } from './constants';
+import {
+  DEFAULT_HIDDEN_CATEGORIES,
+  INIT_TIMEOUT_MS,
+  ORBIT_BATCH_MAX,
+  STORAGE_KEYS,
+} from './constants';
+
+const nf = new Intl.NumberFormat('fr-FR');
 
 export default function App(): JSX.Element {
   const { snapshot, loading, refreshing, error, refresh } = useCatalog();
@@ -101,6 +108,22 @@ export default function App(): JSX.Element {
         : [...favorites, selected.noradId],
     );
   }, [favorites, selected, setFavorites]);
+
+  /*
+   * Délai de garde sur l'initialisation du moteur de propagation. Sans lui, un
+   * moteur qui ne démarre pas se traduit par un voile de chargement perpétuel,
+   * sans aucun message — le défaut qui a rendu l'application inutilisable
+   * plusieurs jours sans qu'on puisse le diagnostiquer.
+   */
+  const [initTimedOut, setInitTimedOut] = useState(false);
+  useEffect(() => {
+    if (!satellites || satellites.length === 0 || propagation.ready) {
+      setInitTimedOut(false);
+      return;
+    }
+    const id = window.setTimeout(() => setInitTimedOut(true), INIT_TIMEOUT_MS);
+    return () => window.clearTimeout(id);
+  }, [satellites, propagation.ready]);
 
   /** Au moins une source en échec : l'alerte détaillée prime alors sur le voile. */
   const sourcesFailed = snapshot?.sources.some((s) => !s.ok) ?? false;
@@ -200,13 +223,57 @@ export default function App(): JSX.Element {
             </div>
           )}
 
-          {!loading && satellites && satellites.length > 0 && !propagation.ready && (
+          {/*
+            Voile d'initialisation **borné dans le temps**. Un spinner qui tourne
+            indéfiniment a masqué pendant des jours un worker qui ne démarrait
+            pas : passé le délai de garde, on affiche l'anomalie au lieu de
+            laisser croire que le calcul progresse.
+          */}
+          {!loading && satellites && satellites.length > 0 && !propagation.ready && !initTimedOut && (
             <div className="overlay overlay-soft">
               <div className="overlay-stack">
                 <Spin />
                 <span>Initialisation de la propagation SGP4…</span>
               </div>
             </div>
+          )}
+
+          {!loading &&
+            satellites &&
+            satellites.length > 0 &&
+            !propagation.ready &&
+            initTimedOut && (
+              <Alert
+                className="floating-alert"
+                type="error"
+                showIcon
+                message="Le calcul des positions n’a pas démarré"
+                description={
+                  <>
+                    <div>
+                      {nf.format(satellites.length)} objets ont bien été reçus du serveur, mais
+                      le moteur de propagation n’a pas répondu au bout de{' '}
+                      {INIT_TIMEOUT_MS / 1000} secondes.
+                    </div>
+                    <div className="alert-hint">
+                      Ouvrez la console du navigateur : l’erreur y sera visible. Puis
+                      rechargez la page en forçant le cache (Cmd + Maj + R).
+                    </div>
+                  </>
+                }
+              />
+            )}
+
+          {/* Repli sur le thread principal : l'application fonctionne, en moins fluide. */}
+          {propagation.fallbackReason && (
+            <Alert
+              className="floating-alert floating-alert-low"
+              type="warning"
+              showIcon
+              closable
+              message="Calcul sur le thread principal"
+              description={`Le worker de calcul n’a pas démarré (${propagation.fallbackReason}). Les positions sont calculées dans la page : l’affichage reste correct mais peut être moins fluide.`}
+            />
           )}
 
           {error && (

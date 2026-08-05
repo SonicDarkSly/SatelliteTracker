@@ -37,6 +37,20 @@ export default defineConfig({
       },
     },
   },
+  /*
+   * Worker en modules ES et satellite.js pré-préparé.
+   *
+   * satellite.js 7 est un paquet ESM pur (`"type": "module"`, exports sans point
+   * d'entrée CommonJS). Sans pré-préparation explicite, son chargement depuis un
+   * module worker peut échouer — et un worker qui échoue meurt en silence : c'est
+   * ce qui a laissé l'application sur un voile « initialisation » perpétuel.
+   */
+  worker: {
+    format: 'es',
+  },
+  optimizeDeps: {
+    include: ['satellite.js'],
+  },
   build: {
     // Cesium est volumineux par nature : on relève le seuil d'avertissement.
     chunkSizeWarningLimit: 4000,

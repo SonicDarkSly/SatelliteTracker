@@ -7,7 +7,9 @@
  * détail du satellite sélectionné) transitent par useState.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { SatelliteRecord, SatelliteState, WorkerResponse } from '../types';
+import { createPropagationHost } from '../propagation/host';
+import type { PropagationHost } from '../propagation/host';
+import type { OmmRecord, SatelliteRecord, SatelliteState, WorkerResponse } from '../types';
 
 export interface PropagationFrame {
   /** Positions ECEF en mètres (3 par objet), instant `simEpochMs`. */
@@ -43,8 +45,14 @@ export interface Propagation {
   /** Position géodésique du satellite suivi, rafraîchie à chaque trame. */
   detail: { index: number; state: SatelliteState } | undefined;
   ready: boolean;
-  /** Nombre d'objets dont le TLE est propageable. */
+  /** Nombre d'objets dont les éléments sont propageables. */
   propagableCount: number;
+  /**
+   * Motif de repli sur le thread principal, si le worker n'a pas démarré.
+   * `undefined` en fonctionnement normal. Affiché à l'utilisateur : un calcul
+   * dégradé mais visible vaut mieux qu'un blocage silencieux.
+   */
+  fallbackReason: string | undefined;
   rate: number;
   setRate: (rate: number) => void;
   /** Décale l'horloge simulée (en minutes) ; 0 = revenir à l'instant présent. */
@@ -56,7 +64,9 @@ export interface Propagation {
 }
 
 export function usePropagation(satellites: SatelliteRecord[] | undefined): Propagation {
-  const workerRef = useRef<Worker | undefined>(undefined);
+  const hostRef = useRef<PropagationHost | undefined>(undefined);
+  /** Derniers éléments transmis, à réémettre en cas de bascule d'hôte. */
+  const elementsRef = useRef<OmmRecord[] | undefined>(undefined);
   const frameRef = useRef<PropagationFrame | undefined>(undefined);
   const clockRef = useRef({ anchorWallMs: Date.now(), anchorSimMs: Date.now(), rate: 1 });
   const trackedRef = useRef<number | null>(null);
@@ -72,16 +82,11 @@ export function usePropagation(satellites: SatelliteRecord[] | undefined): Propa
   const [hoverOrbit, setHoverOrbit] = useState<Propagation['hoverOrbit']>();
   const [detail, setDetail] = useState<Propagation['detail']>();
   const [rate, setRateState] = useState(1);
+  const [fallbackReason, setFallbackReason] = useState<string | undefined>();
 
-  // Création du worker (une seule fois) et branchement des réponses.
+  // Création de l'hôte de calcul (une seule fois) et branchement des réponses.
   useEffect(() => {
-    const worker = new Worker(new URL('../workers/propagation.worker.ts', import.meta.url), {
-      type: 'module',
-    });
-    workerRef.current = worker;
-
-    worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
-      const message = event.data;
+    const handle = (message: WorkerResponse): void => {
       switch (message.type) {
         case 'ready': {
           let ok = 0;
@@ -122,16 +127,25 @@ export function usePropagation(satellites: SatelliteRecord[] | undefined): Propa
       }
     };
 
+    const host = createPropagationHost(handle, (reason) => {
+      // Le worker est mort : on le signale et on renvoie le catalogue à l'hôte
+      // de remplacement, faute de quoi rien ne serait jamais calculé.
+      setFallbackReason(reason);
+      setReady(false);
+      const elements = elementsRef.current;
+      if (elements) hostRef.current?.post({ type: 'init', elements });
+    });
+    hostRef.current = host;
+
     return () => {
-      worker.postMessage({ type: 'stop' });
-      worker.terminate();
-      workerRef.current = undefined;
+      host.dispose();
+      hostRef.current = undefined;
     };
   }, []);
 
   // Chargement du catalogue dans le worker dès qu'il est disponible.
   useEffect(() => {
-    if (!workerRef.current || !satellites) return;
+    if (!hostRef.current || !satellites) return;
 
     frameRef.current = undefined;
 
@@ -149,10 +163,9 @@ export function usePropagation(satellites: SatelliteRecord[] | undefined): Propa
     }
 
     setReady(false);
-    workerRef.current.postMessage({
-      type: 'init',
-      elements: satellites.map((s) => s.omm),
-    });
+    const elements = satellites.map((s) => s.omm);
+    elementsRef.current = elements;
+    hostRef.current.post({ type: 'init', elements });
   }, [satellites]);
 
   // Rafraîchissement périodique des orbites : elles sont figées dans le repère
@@ -162,14 +175,14 @@ export function usePropagation(satellites: SatelliteRecord[] | undefined): Propa
   useEffect(() => {
     const tracked = window.setInterval(() => {
       const index = trackedRef.current;
-      if (index !== null && workerRef.current) {
-        workerRef.current.postMessage({ type: 'orbit', index });
+      if (index !== null && hostRef.current) {
+        hostRef.current.post({ type: 'orbit', index });
       }
     }, 2000);
 
     const batch = window.setInterval(() => {
-      if (orbitTargetsRef.current.length > 0 && workerRef.current) {
-        workerRef.current.postMessage({ type: 'orbits', indices: orbitTargetsRef.current });
+      if (orbitTargetsRef.current.length > 0 && hostRef.current) {
+        hostRef.current.post({ type: 'orbits', indices: orbitTargetsRef.current });
       }
     }, 6000);
 
@@ -187,7 +200,7 @@ export function usePropagation(satellites: SatelliteRecord[] | undefined): Propa
       setHoverOrbit(undefined);
       return;
     }
-    workerRef.current?.postMessage({ type: 'previewOrbit', index });
+    hostRef.current?.post({ type: 'previewOrbit', index });
   }, []);
 
   const setOrbitTargets = useCallback((indices: number[]) => {
@@ -196,12 +209,12 @@ export function usePropagation(satellites: SatelliteRecord[] | undefined): Propa
       setOrbits(undefined);
       return;
     }
-    workerRef.current?.postMessage({ type: 'orbits', indices });
+    hostRef.current?.post({ type: 'orbits', indices });
   }, []);
 
   const pushClock = useCallback((simEpochMs: number, nextRate: number) => {
     clockRef.current = { anchorWallMs: Date.now(), anchorSimMs: simEpochMs, rate: nextRate };
-    workerRef.current?.postMessage({ type: 'clock', simEpochMs, rate: nextRate });
+    hostRef.current?.post({ type: 'clock', simEpochMs, rate: nextRate });
   }, []);
 
   const simNow = useCallback(() => {
@@ -230,8 +243,8 @@ export function usePropagation(satellites: SatelliteRecord[] | undefined): Propa
     trackedRef.current = index;
     setOrbit(undefined);
     setDetail(undefined);
-    workerRef.current?.postMessage({ type: 'detail', index });
-    if (index !== null) workerRef.current?.postMessage({ type: 'orbit', index });
+    hostRef.current?.post({ type: 'detail', index });
+    if (index !== null) hostRef.current?.post({ type: 'orbit', index });
   }, []);
 
   return useMemo(
@@ -245,6 +258,7 @@ export function usePropagation(satellites: SatelliteRecord[] | undefined): Propa
       detail,
       ready,
       propagableCount,
+      fallbackReason,
       rate,
       setRate,
       seek,
@@ -260,6 +274,7 @@ export function usePropagation(satellites: SatelliteRecord[] | undefined): Propa
       detail,
       ready,
       propagableCount,
+      fallbackReason,
       rate,
       setRate,
       seek,

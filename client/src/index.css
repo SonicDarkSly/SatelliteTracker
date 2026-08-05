@@ -554,3 +554,8 @@ body {
 .alert-action {
   margin-top: 8px;
 }
+
+/* Deuxième bandeau : décalé pour ne pas recouvrir le premier. */
+.floating-alert-low {
+  top: 90px;
+}

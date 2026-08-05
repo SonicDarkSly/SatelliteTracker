@@ -84,3 +84,11 @@ export const ORBIT_BATCH_MAX = 200;
  * signifient qu'une source majeure manque. Même valeur que le garde-fou serveur.
  */
 export const MIN_USABLE_CATALOG = 1000;
+
+/**
+ * Délai de garde avant de considérer que le moteur de propagation n'a pas
+ * démarré. Choisi large : construire 16 000 enregistrements SGP4 prend moins de
+ * 100 ms, mais le transfert du catalogue vers le worker peut être lent sur une
+ * machine chargée. Au-delà, il s'agit d'une anomalie, pas d'une lenteur.
+ */
+export const INIT_TIMEOUT_MS = 15_000;
