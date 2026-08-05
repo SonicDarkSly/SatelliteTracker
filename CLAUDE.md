@@ -95,12 +95,15 @@ Lanceurs double-clic : `Lancer-SatelliteTracker-{macOS.command,Windows.bat,Linux
 
 ## Points de vigilance
 
-- **Ne jamais mettre `satellite.js` dans `optimizeDeps.include`.** Cela force esbuild à
-  analyser tout le paquet, dont `wasm-build/pthreads-release/` qui utilise du top-level
-  await et `node:worker_threads` : Vite refuse alors de démarrer (« Top-level await is not
-  available in the configured target environment ») et le client ne se lance plus du tout.
-  L'import normal n'atteint jamais ce dossier — `dist/index.js` ne référence que
-  `./dist/wasm/`, sans top-level await.
+- **La cible esbuild doit rester `esnext`** (`optimizeDeps.esbuildOptions.target` et
+  `build.target`). satellite.js 7 embarque un moteur WebAssembly optionnel, chargé par
+  imports dynamiques conditionnels dans `dist/wasm/runtimes/index.js` :
+  `await import('#wasm-multi-thread')` → `wasm-build/pthreads-release/index.js`, qui
+  contient du **top-level await**. Ces imports ne sont jamais exécutés (on n'utilise pas le
+  moteur WASM), mais le scanner de dépendances de Vite suit les imports dynamiques : avec
+  la cible par défaut, Vite **refuse de démarrer** et il n'y a plus de page du tout.
+  Vérifié par bundling direct : cible par défaut ⇒ échec, `esnext` ⇒ succès.
+  Ne pas confondre avec `optimizeDeps.include: ['satellite.js']`, qui ne corrige rien.
 - **Tout chemin critique doit remonter ses erreurs.** Le worker de propagation n'avait ni
   `onerror` ni `onmessageerror` : un échec de chargement le tuait en silence, `ready`
   restait faux et l'application affichait un voile « initialisation » perpétuel. Plusieurs
