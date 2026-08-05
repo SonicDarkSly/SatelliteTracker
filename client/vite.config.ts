@@ -38,18 +38,19 @@ export default defineConfig({
     },
   },
   /*
-   * Worker en modules ES et satellite.js pré-préparé.
+   * Worker en modules ES, cohérent avec `new Worker(..., { type: 'module' })`.
    *
-   * satellite.js 7 est un paquet ESM pur (`"type": "module"`, exports sans point
-   * d'entrée CommonJS). Sans pré-préparation explicite, son chargement depuis un
-   * module worker peut échouer — et un worker qui échoue meurt en silence : c'est
-   * ce qui a laissé l'application sur un voile « initialisation » perpétuel.
+   * NE PAS ajouter `optimizeDeps.include: ['satellite.js']`. Je l'avais fait par
+   * précaution, sans vérifier : cela force esbuild à analyser tout le paquet, y
+   * compris son dossier `wasm-build/pthreads-release/` qui utilise du top-level
+   * await et `node:worker_threads`. Résultat, Vite refusait de démarrer :
+   *   « Top-level await is not available in the configured target environment »
+   * Or ce dossier n'est jamais atteint par l'import normal — `dist/index.js` ne
+   * référence que `./dist/wasm/`, sans top-level await. La pré-préparation était
+   * donc à la fois inutile et nuisible.
    */
   worker: {
     format: 'es',
-  },
-  optimizeDeps: {
-    include: ['satellite.js'],
   },
   build: {
     // Cesium est volumineux par nature : on relève le seuil d'avertissement.

@@ -105,6 +105,16 @@ else
   echo "✅ Dépendances déjà installées (node_modules complet)."
 fi
 
+# Cache de pré-préparation de Vite : un démarrage interrompu (erreur de config,
+# Ctrl+C pendant l'optimisation) y laisse un état partiel qui fait échouer les
+# lancements suivants avec des erreurs sans lien apparent. Il se régénère en
+# quelques secondes, autant repartir propre quand le dernier lancement a échoué.
+VITE_CACHE="node_modules/.vite"
+if [ -d "$VITE_CACHE" ] && [ ! -f "$VITE_CACHE/deps/_metadata.json" ]; then
+  echo "🧹 Cache Vite incomplet — remise à zéro…"
+  rm -rf "$VITE_CACHE"
+fi
+
 echo "🚀 Démarrage de SatelliteTracker…"
 npm run dev &
 DEV_PID=$!

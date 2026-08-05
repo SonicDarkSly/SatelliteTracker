@@ -95,6 +95,20 @@ Lanceurs double-clic : `Lancer-SatelliteTracker-{macOS.command,Windows.bat,Linux
 
 ## Points de vigilance
 
+- **Ne jamais mettre `satellite.js` dans `optimizeDeps.include`.** Cela force esbuild à
+  analyser tout le paquet, dont `wasm-build/pthreads-release/` qui utilise du top-level
+  await et `node:worker_threads` : Vite refuse alors de démarrer (« Top-level await is not
+  available in the configured target environment ») et le client ne se lance plus du tout.
+  L'import normal n'atteint jamais ce dossier — `dist/index.js` ne référence que
+  `./dist/wasm/`, sans top-level await.
+- **Tout chemin critique doit remonter ses erreurs.** Le worker de propagation n'avait ni
+  `onerror` ni `onmessageerror` : un échec de chargement le tuait en silence, `ready`
+  restait faux et l'application affichait un voile « initialisation » perpétuel. Plusieurs
+  jours d'inutilisabilité sans un seul message. D'où, désormais : remontée des erreurs du
+  worker, **repli sur le thread principal** (`propagation/host.ts`, moteur partagé dans
+  `propagation/engine.ts`), et **délai de garde de 15 s** au-delà duquel l'interface
+  affiche l'anomalie au lieu d'un spinner.
+
 - **`vite.config.ts` et le hoisting npm workspaces** : `vite-plugin-cesium` cherche
   `node_modules/cesium/Build` relativement au dossier `client/`, alors que node_modules est
   remonté à la racine. Le chemin est résolu dynamiquement (`require.resolve`) et passé via
