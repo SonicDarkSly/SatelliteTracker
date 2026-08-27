@@ -13,27 +13,49 @@ else
   OPEN=xdg-open
 fi
 
-# Charger Node.js si installé via nvm
+# ---------------------------------------------------------------------------
+# Node.js : le projet exige la version 24 (voir .nvmrc et le champ "engines").
+#
+# Il ne suffit pas d'installer Node quand il est absent : si une autre version
+# est active via nvm, elle serait utilisée telle quelle. On active donc
+# explicitement la version du .nvmrc, et on l'installe si elle manque.
+# ---------------------------------------------------------------------------
+NODE_MAJOR=$(tr -dc '0-9' < .nvmrc 2>/dev/null || echo 24)
+NODE_MAJOR=${NODE_MAJOR:-24}
+
 export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
 
-# Installation via nvm au premier lancement si Node est absent
-NODE_MAJOR=24
-if ! command -v npm >/dev/null 2>&1; then
-  if [ ! -s "$NVM_DIR/nvm.sh" ]; then
-    echo "📥 Node.js est introuvable — installation de nvm (gestionnaire de versions Node)…"
+# Majeure de la version de Node actuellement active, ou 0 si Node est absent.
+node_major() {
+  command -v node >/dev/null 2>&1 || { echo 0; return; }
+  node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0
+}
+
+# Installation de nvm si nécessaire (aucun Node, ou version trop ancienne).
+if ! command -v nvm >/dev/null 2>&1 && [ ! -s "$NVM_DIR/nvm.sh" ]; then
+  if [ "$(node_major)" -lt "$NODE_MAJOR" ]; then
+    echo "📥 Node.js ${NODE_MAJOR} requis — installation de nvm (gestionnaire de versions Node)…"
     if ! curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash; then
       echo "❌ Installation de nvm impossible (connexion internet ?)."
-      echo "   Alternative : installer Node.js depuis https://nodejs.org puis relancer."
+      echo "   Alternative : installer Node.js ${NODE_MAJOR} depuis https://nodejs.org puis relancer."
       read -r -p "Appuie sur Entrée pour fermer… "
       exit 1
     fi
     export NVM_DIR="$HOME/.nvm"
     . "$NVM_DIR/nvm.sh"
   fi
-  echo "📥 Installation de Node.js ${NODE_MAJOR} via nvm…"
-  nvm install "$NODE_MAJOR" && nvm alias default "$NODE_MAJOR"
-  echo "✅ Node.js $(node --version) installé via nvm (désinstallation : supprimer ~/.nvm)."
+fi
+
+# Activation de la version du .nvmrc. `nvm use` et `nvm install` sans argument
+# lisent ce fichier, ce qui évite de dupliquer le numéro de version ici.
+if command -v nvm >/dev/null 2>&1; then
+  if ! nvm use >/dev/null 2>&1; then
+    echo "📥 Installation de Node.js ${NODE_MAJOR} via nvm…"
+    nvm install >/dev/null 2>&1
+    nvm use >/dev/null 2>&1
+    nvm alias default "$NODE_MAJOR" >/dev/null 2>&1
+  fi
 fi
 
 if ! command -v npm >/dev/null 2>&1; then
@@ -41,6 +63,15 @@ if ! command -v npm >/dev/null 2>&1; then
   read -r -p "Appuie sur Entrée pour fermer… "
   exit 1
 fi
+
+ACTIVE_MAJOR=$(node_major)
+if [ "$ACTIVE_MAJOR" -lt "$NODE_MAJOR" ]; then
+  echo "❌ Node.js ${NODE_MAJOR} est requis, or la version active est $(node --version)."
+  echo "   Avec nvm :  nvm install ${NODE_MAJOR} && nvm use ${NODE_MAJOR}"
+  read -r -p "Appuie sur Entrée pour fermer… "
+  exit 1
+fi
+echo "✅ Node.js $(node --version) · npm $(npm --version)"
 
 # Déjà lancé ? On ouvre juste la page.
 if curl -s --max-time 2 http://localhost:3001/api/health | grep -q ok \

@@ -45,17 +45,27 @@ Double-clic sur le lanceur correspondant à votre système :
 | Windows | `Lancer-SatelliteTracker-Windows.bat` |
 | Linux | `Lancer-SatelliteTracker-Linux.sh` |
 
-Le lanceur installe Node.js si nécessaire (via nvm sur macOS/Linux, version portable sur
-Windows), installe les dépendances au premier lancement, démarre serveur + client puis
-ouvre la page. Laisser la fenêtre ouverte pendant l'utilisation ; la fermer arrête tout.
+Le lanceur **garantit Node.js 24** : il active la version du `.nvmrc` via nvm sur
+macOS/Linux (version portable téléchargée sur Windows), l'installe si elle manque, et
+refuse de démarrer avec une version plus ancienne plutôt que d'échouer plus loin de façon
+obscure. Il installe ensuite les dépendances au premier lancement, démarre serveur +
+client, puis ouvre la page. Laisser la fenêtre ouverte pendant l'utilisation ; la fermer
+arrête tout.
 
 En ligne de commande :
 
 ```bash
+nvm use         # Node 24, lu depuis .nvmrc
 npm install     # installe server + client (npm workspaces)
 npm run dev     # serveur (3001) + client (5173) en parallèle
 npm run build   # build serveur (tsc) + client (vite)
 ```
+
+### Prérequis
+
+**Node.js 24 ou plus**, déclaré à trois endroits cohérents : `.nvmrc` (activation par nvm),
+le champ `engines` de chaque `package.json` (npm avertit en cas d'écart) et les lanceurs
+(vérification au démarrage).
 
 La page est aussi accessible depuis un autre appareil du réseau local
 (`http://IP-de-la-machine:5173`) — l'adresse est affichée par le lanceur.

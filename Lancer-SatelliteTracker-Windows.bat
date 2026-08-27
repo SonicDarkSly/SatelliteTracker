@@ -4,13 +4,25 @@ rem Laissez cette fenetre ouverte pendant l'utilisation ; la fermer arrete tout.
 chcp 65001 >nul
 cd /d "%~dp0"
 
-rem Node portable local (installe au premier lancement si absent du systeme)
+rem Node portable local. Le projet exige Node 24 (voir .nvmrc et "engines").
+rem Comme sous macOS/Linux, il ne suffit pas d'installer Node quand il est
+rem absent : une version plus ancienne deja presente serait utilisee telle
+rem quelle. On verifie donc la version majeure active.
 set NODE_VERSION=24.18.0
+set NODE_MAJOR=24
 if exist "%CD%\.node\node.exe" set "PATH=%CD%\.node;%PATH%"
 
 where npm >nul 2>nul
-if not errorlevel 1 goto nodeok
-echo [..] Node.js est introuvable - installation portable dans le dossier de l'app...
+if errorlevel 1 goto installnode
+
+rem Node est present : sa version majeure est-elle suffisante ?
+for /f %%v in ('node -p "process.versions.node.split('.')[0]" 2^>nul') do set ACTIVE_MAJOR=%%v
+if not defined ACTIVE_MAJOR set ACTIVE_MAJOR=0
+if %ACTIVE_MAJOR% GEQ %NODE_MAJOR% goto nodeok
+echo [!] Node.js %NODE_MAJOR% requis - version active trop ancienne, installation portable...
+
+:installnode
+echo [..] Installation portable de Node.js %NODE_VERSION% dans le dossier de l'app...
 curl -fL -o node-portable.zip https://nodejs.org/dist/v%NODE_VERSION%/node-v%NODE_VERSION%-win-x64.zip
 if errorlevel 1 (
   echo [X] Telechargement de Node.js impossible - connexion internet ?
@@ -31,6 +43,7 @@ if errorlevel 1 (
   exit /b 1
 )
 :nodeok
+for /f "delims=" %%v in ('node --version') do echo [OK] Node.js %%v
 
 rem Deja lance ? On ouvre juste la page.
 curl -s --max-time 2 http://localhost:3001/api/health 2>nul | findstr ok >nul

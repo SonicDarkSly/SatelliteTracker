@@ -81,7 +81,13 @@ chiffres et supprime le découpage par colonnes et les sommes de contrôle.
 
 ## Commandes
 
+**Node 24 requis** — `.nvmrc`, champs `engines`, et vérification dans les lanceurs. Les
+lanceurs activent la version du `.nvmrc` via nvm et refusent de démarrer en dessous :
+installer Node quand il est absent ne suffisait pas, une version plus ancienne déjà active
+était utilisée telle quelle.
+
 ```bash
+nvm use                     # Node 24 (lu depuis .nvmrc)
 npm install                 # installe server + client (workspaces)
 npm run dev                 # serveur + client en parallèle
 npm run build               # build serveur (tsc) + client (vite)
