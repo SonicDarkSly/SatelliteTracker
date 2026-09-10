@@ -150,7 +150,7 @@ export class SatelliteCatalogService {
       this.lastUnusable &&
       Date.now() - this.lastUnusable.attemptedAt < UNUSABLE_RETRY_INTERVAL_MS
     ) {
-      return this.lastUnusable.snapshot;
+      return this.echeanceHonnete(this.lastUnusable);
     }
 
     if (this.inFlight) return this.withResponseBudget(this.inFlight);
@@ -173,6 +173,29 @@ export class SatelliteCatalogService {
    * `fetching` : le client affiche l'état et redemande quelques secondes plus tard,
    * pendant que la récupération se poursuit en tâche de fond.
    */
+  /**
+   * Instantané inexploitable resservi, avec une échéance qui dit vrai.
+   *
+   * L'instantané est figé à l'instant de la tentative : son `retryAt` vient des
+   * sources et ignore le garde-fou de 5 min de ce service. Une fois cet instant
+   * dépassé, le client relançait à l'échéance annoncée, se faisait resservir le
+   * même instantané — donc la même échéance, déjà passée — et restait bloqué sur
+   * « nouvelle tentative en cours » sans que rien ne reparte jamais. Constaté en
+   * vrai : décompte à zéro à 09:47:20, une requête à 09:47:22 court-circuitée,
+   * puis plus rien. On annonce donc l'instant où une tentative sera réellement
+   * possible, jamais un instant déjà passé.
+   */
+  private echeanceHonnete(unusable: { snapshot: CatalogSnapshot; attemptedAt: number }): CatalogSnapshot {
+    const auPlusTot = unusable.attemptedAt + UNUSABLE_RETRY_INTERVAL_MS;
+    const sources = unusable.snapshot.sources.map((source) => {
+      if (source.ok) return source;
+      const annonce = source.retryAt ? Date.parse(source.retryAt) : Number.NaN;
+      const reel = Number.isFinite(annonce) ? Math.max(annonce, auPlusTot) : auPlusTot;
+      return { ...source, retryAt: new Date(reel).toISOString() };
+    });
+    return { ...unusable.snapshot, sources };
+  }
+
   private withResponseBudget(pending: Promise<CatalogSnapshot>): Promise<CatalogSnapshot> {
     return new Promise<CatalogSnapshot>((resolve) => {
       let settled = false;

@@ -6,7 +6,7 @@
  * Sans cela, le message restait figé à l'écran — heure absolue, aucun mouvement —
  * et rien n'indiquait que quelque chose allait se produire.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert, Button, Typography } from 'antd';
 import type { CatalogSnapshot } from '../types';
 
@@ -46,9 +46,23 @@ export function SourceAlert({ snapshot, onRetry }: Props): JSX.Element | null {
     return () => window.clearInterval(id);
   }, [nextTry]);
 
+  /**
+   * Échéance déjà honorée.
+   *
+   * Sans cette mémoire, l'effet repartait à chaque battement du décompte : une
+   * fois l'instant dépassé, `now` change toutes les secondes et relançait
+   * indéfiniment. Le cache du navigateur l'a longtemps masqué — les requêtes ne
+   * sortaient pas de la page — jusqu'à les voir défiler en boucle dans
+   * l'inspecteur. Une relance par échéance annoncée, pas davantage ; c'est le
+   * sondage sur `fetching` qui assure la suite.
+   */
+  const relanceFaite = useRef<number | undefined>(undefined);
+
   // Échéance atteinte : on relance sans attendre une action de l'utilisateur.
   useEffect(() => {
     if (nextTry === undefined || now < nextTry) return;
+    if (relanceFaite.current === nextTry) return;
+    relanceFaite.current = nextTry;
     onRetry();
   }, [nextTry, now, onRetry]);
 
