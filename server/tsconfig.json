@@ -5,6 +5,15 @@
     "moduleResolution": "node",
     "outDir": "dist",
     "rootDir": "src",
+    // Compilation incrémentale — indispensable ici, et pas pour la vitesse.
+    // `npm run dev` enchaîne `npm run build` puis `tsc -w` : sans état
+    // conservé, la première passe du mode watch réémet tout `dist/`,
+    // `node --watch` redémarre le serveur, et le préchargement du bootstrap
+    // relance un appel à Celestrak une seconde après le premier. Deux appels
+    // rapprochés suffisent à déclencher le HTTP 403. Avec le .tsbuildinfo,
+    // cette première passe n'émet rien et le serveur ne démarre qu'une fois.
+    "incremental": true,
+    "tsBuildInfoFile": "dist/.tsbuildinfo",
     "strict": true,
     "strictPropertyInitialization": false,
     "esModuleInterop": true,
